@@ -1,6 +1,5 @@
 package com.fypals.FYPals.notification.service;
 
-import com.fypals.FYPals.enums.NotificationType;
 import com.fypals.FYPals.notification.dto.NotificationResponse;
 import com.fypals.FYPals.notification.entity.Notification;
 import com.fypals.FYPals.notification.repository.NotificationRepository;
@@ -21,17 +20,14 @@ public class NotificationService {
     private final NotificationRepository notificationRepository;
     private final UserRepository userRepository;
 
-    /**
-     * Core method — call this from anywhere in the app to notify a user.
-     * Example: notificationService.sendNotification(userId, "You've been invited to Team Alpha", NotificationType.TEAM_INVITE, teamId);
-     */
     @Transactional
-    public Notification sendNotification(Long userId, String message, NotificationType type, Long referenceId) {
-        User user = userRepository.findById(userId)
-                .orElseThrow(() -> new EntityNotFoundException("User not found with id: " + userId));
+    public Notification sendNotification(Long userId, String message, String type, Long referenceId) {
+        // Verify user exists
+        userRepository.findById(userId)
+                .orElseThrow(() -> new EntityNotFoundException("User not found: " + userId));
 
         Notification notification = Notification.builder()
-                .user(user)
+                .userId(userId)
                 .message(message)
                 .type(type)
                 .referenceId(referenceId)
@@ -45,7 +41,8 @@ public class NotificationService {
         User user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new EntityNotFoundException("User not found"));
 
-        return notificationRepository.findByUserIdOrderByCreatedAtDesc(user.getId())
+        return notificationRepository
+                .findByUserIdOrderByCreatedAtDesc(user.getId())
                 .stream()
                 .map(this::toResponse)
                 .toList();
@@ -59,9 +56,8 @@ public class NotificationService {
         Notification notification = notificationRepository.findById(notificationId)
                 .orElseThrow(() -> new EntityNotFoundException("Notification not found"));
 
-        // Make sure the notification belongs to this user
-        if (!notification.getUser().getId().equals(user.getId())) {
-            throw new AccessDeniedException("You can only mark your own notifications as read");
+        if (!notification.getUserId().equals(user.getId())) {
+            throw new AccessDeniedException("This notification doesn't belong to you");
         }
 
         notification.setRead(true);

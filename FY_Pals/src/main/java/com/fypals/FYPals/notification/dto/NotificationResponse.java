@@ -1,11 +1,6 @@
 package com.fypals.FYPals.notification.dto;
 
-import com.fypals.FYPals.enums.NotificationType;
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Data;
-import lombok.NoArgsConstructor;
-
+import lombok.*;
 import java.time.LocalDateTime;
 
 @Data
@@ -15,7 +10,7 @@ import java.time.LocalDateTime;
 public class NotificationResponse {
     private Long id;
     private String message;
-    private NotificationType type;
+    private String type;        // String instead of enum
     private boolean read;
     private Long referenceId;
     private LocalDateTime createdAt;

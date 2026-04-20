@@ -1,7 +1,7 @@
 package com.fypals.FYPals.team.service;
 
 import com.fypals.FYPals.enums.MemberRole;
-import com.fypals.FYPals.enums.NotificationType;
+
 import com.fypals.FYPals.enums.TeamStatus;
 import com.fypals.FYPals.notification.entity.Notification;
 import com.fypals.FYPals.notification.repository.NotificationRepository;
@@ -83,7 +83,7 @@ public class InviteService {
         notificationService.sendNotification(
                 team.getLeader().getId(),
                 user.getName() + " accepted your invite to join " + team.getTeamName(),
-                NotificationType.TEAM_INVITE,
+                "TEAM_INVITE",
                 teamId
         );
 
@@ -113,7 +113,7 @@ public class InviteService {
         notificationService.sendNotification(
                 team.getLeader().getId(),
                 user.getName() + " declined your invite to join " + team.getTeamName(),
-                NotificationType.TEAM_INVITE,
+                "TEAM_INVITE",
                 teamId
         );
 
@@ -125,13 +125,13 @@ public class InviteService {
                 .orElseThrow(() -> new EntityNotFoundException("Notification not found"));
 
         // Must belong to the current user
-        if (!notification.getUser().getId().equals(user.getId())) {
+        if (!notification.getUserId().equals(user.getId())) {
             throw new AccessDeniedException("This notification doesn't belong to you");
         }
 
         // Must be a team invite type
-        if (notification.getType() != NotificationType.TEAM_INVITE
-                && notification.getType() != NotificationType.ADVISOR_INVITE) {
+        if (!notification.getType().equals("TEAM_INVITE")
+                && !notification.getType().equals("ADVISOR_INVITE")) {
             throw new IllegalStateException("This notification is not a team invite");
         }
 
