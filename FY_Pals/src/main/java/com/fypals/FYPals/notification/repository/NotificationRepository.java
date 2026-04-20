@@ -2,7 +2,6 @@ package com.fypals.FYPals.notification.repository;
 
 import com.fypals.FYPals.notification.entity.Notification;
 import org.springframework.data.jpa.repository.JpaRepository;
-
 import java.util.List;
 
 public interface NotificationRepository extends JpaRepository<Notification, Long> {

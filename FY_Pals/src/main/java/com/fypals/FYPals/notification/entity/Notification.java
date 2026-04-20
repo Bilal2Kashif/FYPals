@@ -1,10 +1,7 @@
 package com.fypals.FYPals.notification.entity;
 
-import com.fypals.FYPals.enums.NotificationType;
-import com.fypals.FYPals.user.entity.User;
 import jakarta.persistence.*;
 import lombok.*;
-
 import java.time.LocalDateTime;
 
 @Entity
@@ -19,21 +16,18 @@ public class Notification {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "user_id", nullable = false)
-    private User user;
+    @Column(nullable = false)
+    private Long userId;        // simple Long — no FK join needed
 
     @Column(nullable = false, length = 1000)
     private String message;
 
-    @Enumerated(EnumType.STRING)
     @Column(nullable = false)
-    private NotificationType type;
+    private String type;        // plain String instead of enum
 
-    @Column(name = "is_read", nullable = false)
+    @Column(name = "is_read")
     private boolean read = false;
 
-    // Optional reference to related entity (team id, dispute id, etc.)
     @Column(name = "reference_id")
     private Long referenceId;
 
@@ -41,6 +35,6 @@ public class Notification {
 
     @PrePersist
     protected void onCreate() {
-        createdAt = LocalDateTime.now();
+        if (createdAt == null) createdAt = LocalDateTime.now();
     }
 }
