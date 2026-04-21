@@ -1,5 +1,7 @@
 package com.fypals.FYPals.team.service;
 
+import com.fypals.FYPals.progress.entity.Project;
+import com.fypals.FYPals.progress.repository.ProjectRepository;
 import com.fypals.FYPals.enums.MemberRole;
 import com.fypals.FYPals.enums.TeamStatus;
 import com.fypals.FYPals.notification.entity.Notification;
@@ -22,6 +24,7 @@ import java.util.HashMap;
 @RequiredArgsConstructor
 public class TeamService {
 
+    private final ProjectRepository projectRepository;
     private final TeamRepository teamRepository;
     private final TeamMemberRepository teamMemberRepository;
     private final UserRepository userRepository;
@@ -51,6 +54,14 @@ public class TeamService {
                 .memberRole(MemberRole.LEADER)
                 .build();
         teamMemberRepository.save(leaderMember);
+
+        Project project = Project.builder()
+                .team(team)
+                .description("FYP Project for " + teamName)
+                .status("ACTIVE")
+                .startDate(java.time.LocalDate.now())
+                .build();
+        projectRepository.save(project);
 
         return team;
     }

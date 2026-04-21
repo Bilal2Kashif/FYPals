@@ -78,4 +78,14 @@ public class AuthService {
             }
         };
     }
+
+    public AuthResponse refreshToken(String oldToken) {
+        // Extract email from old token even if expired
+        String email = jwtUtil.extractEmail(oldToken);
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new RuntimeException("User not found"));
+        String newToken = jwtUtil.generateToken(user.getEmail(), user.getRole().name());
+        return new AuthResponse(newToken, user.getEmail(), user.getRole().name());
+    }
+
 }
