@@ -20,11 +20,11 @@ public class NotificationService {
     private final NotificationRepository notificationRepository;
     private final UserRepository userRepository;
 
+    // Add this method to NotificationService.java
     @Transactional
     public Notification sendNotification(Long userId, String message, String type, Long referenceId) {
-        // Verify user exists
-        userRepository.findById(userId)
-                .orElseThrow(() -> new EntityNotFoundException("User not found: " + userId));
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new EntityNotFoundException("User not found with id: " + userId));
 
         Notification notification = Notification.builder()
                 .userId(userId)
