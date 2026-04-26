@@ -11,4 +11,5 @@ public interface DeliverableRepository extends JpaRepository<Deliverable, Long> 
     List<Deliverable> findByProjectId(Long projectId);
     List<Deliverable> findByDeadlineBetweenAndStatusNotAndReminderSentFalse(
             LocalDate start, LocalDate end, String status);
+    List<Deliverable> findByDeadlineAndStatusNot(LocalDate deadline, String status);
 }

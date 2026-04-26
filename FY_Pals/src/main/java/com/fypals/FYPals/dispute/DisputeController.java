@@ -4,8 +4,11 @@ import com.fypals.FYPals.dispute.entity.Dispute;
 import com.fypals.FYPals.dispute.entity.Poll;
 import com.fypals.FYPals.dispute.entity.PollVote;
 import com.fypals.FYPals.dispute.service.DisputeService;
+import com.fypals.FYPals.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -17,14 +20,21 @@ import java.util.Map;
 public class DisputeController {
 
     private final DisputeService disputeService;
+    private final UserRepository userRepository;
+
+    private Long getUserId(UserDetails userDetails) {
+        return userRepository.findByEmail(userDetails.getUsername())
+                .orElseThrow(() -> new RuntimeException("User not found")).getId();
+    }
 
     @PostMapping
-    public ResponseEntity<?> raiseDispute(@RequestBody Map<String, Object> body) {
+    public ResponseEntity<?> raiseDispute(
+            @RequestBody Map<String, Object> body,
+            @AuthenticationPrincipal UserDetails userDetails) {
         Long teamId = Long.valueOf(body.get("teamId").toString());
-        Long raisedBy = Long.valueOf(body.get("raisedBy").toString());
         String targetItem = body.get("targetItem").toString();
         String reason = body.get("reason").toString();
-        Dispute dispute = disputeService.raiseDispute(teamId, raisedBy, targetItem, reason);
+        Dispute dispute = disputeService.raiseDispute(teamId, getUserId(userDetails), targetItem, reason);
         return ResponseEntity.ok(Map.of("success", true, "data", dispute));
     }
 
@@ -43,22 +53,31 @@ public class DisputeController {
     @PostMapping("/{disputeId}/reject")
     public ResponseEntity<?> rejectDispute(
             @PathVariable Long disputeId,
-            @RequestBody Map<String, Object> body) {
-        Long leaderId = Long.valueOf(body.get("leaderId").toString());
-        String rejectionReason = body.get("rejectionReason").toString();
-        Dispute dispute = disputeService.rejectDispute(disputeId, leaderId, rejectionReason);
+            @RequestBody(required = false) Map<String, Object> body,
+            @AuthenticationPrincipal UserDetails userDetails) {
+        String rejectionReason = (body != null && body.containsKey("rejectionReason"))
+                ? body.get("rejectionReason").toString() : "No reason provided";
+        Dispute dispute = disputeService.rejectDispute(disputeId, getUserId(userDetails), rejectionReason);
         return ResponseEntity.ok(Map.of("success", true, "data", dispute));
     }
 
     @PostMapping("/{disputeId}/accept")
-    public ResponseEntity<?> acceptDisputeAndCreatePoll(
+    public ResponseEntity<?> acceptDispute(
             @PathVariable Long disputeId,
-            @RequestBody Map<String, Object> body) {
-        Long leaderId = Long.valueOf(body.get("leaderId").toString());
+            @AuthenticationPrincipal UserDetails userDetails) {
+        Dispute dispute = disputeService.acceptDispute(disputeId, getUserId(userDetails));
+        return ResponseEntity.ok(Map.of("success", true, "data", dispute));
+    }
+
+    @PostMapping("/{disputeId}/poll")
+    public ResponseEntity<?> createPoll(
+            @PathVariable Long disputeId,
+            @RequestBody Map<String, Object> body,
+            @AuthenticationPrincipal UserDetails userDetails) {
         String question = body.get("question").toString();
         String options = body.get("options").toString();
         LocalDateTime deadline = LocalDateTime.parse(body.get("deadline").toString());
-        Poll poll = disputeService.acceptDisputeAndCreatePoll(disputeId, leaderId, question, options, deadline);
+        Poll poll = disputeService.acceptDisputeAndCreatePoll(disputeId, getUserId(userDetails), question, options, deadline);
         return ResponseEntity.ok(Map.of("success", true, "data", poll));
     }
 
@@ -72,10 +91,10 @@ public class DisputeController {
     public ResponseEntity<?> voteOnPoll(
             @PathVariable Long disputeId,
             @PathVariable Long pollId,
-            @RequestBody Map<String, Object> body) {
-        Long voterId = Long.valueOf(body.get("voterId").toString());
+            @RequestBody Map<String, Object> body,
+            @AuthenticationPrincipal UserDetails userDetails) {
         String chosenOption = body.get("chosenOption").toString();
-        PollVote vote = disputeService.voteOnPoll(pollId, voterId, chosenOption);
+        PollVote vote = disputeService.voteOnPoll(pollId, getUserId(userDetails), chosenOption);
         return ResponseEntity.ok(Map.of("success", true, "data", vote));
     }
 
@@ -85,6 +104,14 @@ public class DisputeController {
             @PathVariable Long pollId) {
         Map<String, Long> results = disputeService.getPollResults(pollId);
         return ResponseEntity.ok(Map.of("success", true, "data", results));
+    }
+
+    @PostMapping("/{disputeId}/resolve")
+    public ResponseEntity<?> resolveDispute(
+            @PathVariable Long disputeId,
+            @AuthenticationPrincipal UserDetails userDetails) {
+        Dispute dispute = disputeService.resolveDispute(disputeId, getUserId(userDetails));
+        return ResponseEntity.ok(Map.of("success", true, "data", dispute));
     }
 
     @GetMapping("/{disputeId}")

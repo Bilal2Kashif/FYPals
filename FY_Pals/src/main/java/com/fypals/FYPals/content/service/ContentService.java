@@ -90,38 +90,27 @@ public class ContentService {
     @Transactional
     public Post voteOnPost(Long postId, Long userId, VoteType voteType) {
         Post post = getPost(postId);
-
         java.util.Optional<Vote> existingVote = voteRepository.findByPostIdAndUserId(postId, userId);
 
         if (existingVote.isPresent()) {
             Vote vote = existingVote.get();
-
             if (vote.getVoteType() == voteType) {
+                // Same vote type — remove vote (toggle off)
                 voteRepository.delete(vote);
-                if (voteType == VoteType.UPVOTE) {
-                    post.setVoteCount(post.getVoteCount() - 1);
-                } else {
-                    post.setVoteCount(post.getVoteCount() + 1);
-                }
             } else {
+                // Different vote type — switch vote
                 vote.setVoteType(voteType);
                 voteRepository.save(vote);
-                if (voteType == VoteType.UPVOTE) {
-                    post.setVoteCount(post.getVoteCount() + 2);
-                } else {
-                    post.setVoteCount(post.getVoteCount() - 2);
-                }
             }
         } else {
-            Vote newVote = new Vote(postId, userId, voteType);
-            voteRepository.save(newVote);
-            if (voteType == VoteType.UPVOTE) {
-                post.setVoteCount(post.getVoteCount() + 1);
-            } else {
-                post.setVoteCount(post.getVoteCount() - 1);
-            }
+            // No existing vote — add new vote
+            voteRepository.save(new Vote(postId, userId, voteType));
         }
 
+        // Recalculate voteCount from actual votes
+        int upvotes = voteRepository.countByPostIdAndVoteType(postId, VoteType.UPVOTE);
+        int downvotes = voteRepository.countByPostIdAndVoteType(postId, VoteType.DOWNVOTE);
+        post.setVoteCount(upvotes - downvotes);
         return postRepository.save(post);
     }
 
