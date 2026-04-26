@@ -94,13 +94,30 @@ public class TeamService {
     public Map<String, Object> getTeam(Long teamId) {
         Team team = teamRepository.findById(teamId)
                 .orElseThrow(() -> new EntityNotFoundException("Team not found"));
-        Map<String, Object> result = new java.util.HashMap<>();
+
+        Map<String, Object> result = new HashMap<>();
         result.put("id", team.getId());
         result.put("teamName", team.getTeamName());
         result.put("status", team.getStatus());
         result.put("leaderId", team.getLeader().getId());
         result.put("leaderName", team.getLeader().getName());
         result.put("memberCount", team.getMembers().size());
+
+        // Add members list
+        java.util.List<Map<String, Object>> members = team.getMembers().stream()
+                .map(m -> {
+                    Map<String, Object> member = new HashMap<>();
+                    member.put("id", m.getId());
+                    member.put("userId", m.getUser().getId());
+                    member.put("userName", m.getUser().getName());
+                    member.put("memberRole", m.getMemberRole());
+                    return member;
+                }).collect(java.util.stream.Collectors.toList());
+        result.put("members", members);
+
+        // Add project id if exists
+        projectRepository.findByTeamId(teamId).ifPresent(p -> result.put("project", Map.of("id", p.getId())));
+
         return result;
     }
 

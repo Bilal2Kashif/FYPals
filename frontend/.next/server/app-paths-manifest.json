@@ -1,0 +1,9 @@
+{
+  "/(protected)/teams/[id]/page": "app/(protected)/teams/[id]/page.js",
+  "/(protected)/notifications/page": "app/(protected)/notifications/page.js",
+  "/(protected)/profile/[id]/page": "app/(protected)/profile/[id]/page.js",
+  "/(protected)/dashboard/page": "app/(protected)/dashboard/page.js",
+  "/(protected)/posts/[id]/page": "app/(protected)/posts/[id]/page.js",
+  "/(protected)/fyp-staff/teams/[teamId]/page": "app/(protected)/fyp-staff/teams/[teamId]/page.js",
+  "/(protected)/posts/page": "app/(protected)/posts/page.js"
+}

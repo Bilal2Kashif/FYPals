@@ -5,6 +5,7 @@ import com.fypals.FYPals.content.repository.PostRepository;
 import com.fypals.FYPals.search.dto.SearchResultDTO;
 import com.fypals.FYPals.user.entity.User;
 import com.fypals.FYPals.user.repository.UserRepository;
+import com.fypals.FYPals.enums.Role;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -32,6 +33,7 @@ public class SearchService {
                 || type.equalsIgnoreCase("user")) {
             userRepository.searchByKeyword(keyword)
                     .stream()
+                    .filter(u -> u.getRole() == Role.STUDENT || u.getRole() == Role.ADVISOR)
                     .map(this::userToDTO)
                     .forEach(results::add);
         }

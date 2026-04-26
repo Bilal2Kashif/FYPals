@@ -9,10 +9,13 @@ import java.time.LocalDateTime;
 @Table(name = "users")
 @Inheritance(strategy = InheritanceType.SINGLE_TABLE)
 @DiscriminatorColumn(name = "dtype", discriminatorType = DiscriminatorType.STRING)
-@Data
+@Getter
+@Setter
 @NoArgsConstructor
 @AllArgsConstructor
-@Builder
+// NOTE: @Builder removed — it breaks subclass instantiation (Student, Advisor etc.)
+// @Data also removed — it generates equals/hashCode which conflicts with @EqualsAndHashCode
+// in subclasses. Use @Getter + @Setter instead.
 public class User {
 
     @Id
@@ -39,6 +42,12 @@ public class User {
     private boolean profileComplete = false;
 
     private LocalDateTime createdAt;
+
+    // Keep a basic toString for logging — avoids circular reference from @Data
+    @Override
+    public String toString() {
+        return "User{id=" + id + ", email='" + email + "', role=" + role + "}";
+    }
 
     @PrePersist
     protected void onCreate() {

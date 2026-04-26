@@ -31,8 +31,35 @@ public class JwtUtil {
                 .compact();
     }
 
+    /** Extracts email from a valid (non-expired) token. Returns null if invalid. */
     public String extractEmail(String token) {
-        return getClaims(token).getSubject();
+        try {
+            return getClaims(token).getSubject();
+        } catch (JwtException | IllegalArgumentException e) {
+            return null;
+        }
+    }
+
+    /**
+     * Extracts email even from an EXPIRED token, as long as the signature is valid.
+     * Used by the refresh flow — the frontend sends its expired access token to get a new one.
+     * Returns null if the token signature is invalid (i.e. tampered).
+     */
+    public String extractEmailIgnoreExpiry(String token) {
+        try {
+            return Jwts.parserBuilder()
+                    .setSigningKey(getSigningKey())
+                    .build()
+                    .parseClaimsJws(token)
+                    .getBody()
+                    .getSubject();
+        } catch (ExpiredJwtException e) {
+            // Expired but signature was valid — safe to trust the subject
+            return e.getClaims().getSubject();
+        } catch (JwtException | IllegalArgumentException e) {
+            // Tampered or garbage token
+            return null;
+        }
     }
 
     public boolean isTokenValid(String token) {

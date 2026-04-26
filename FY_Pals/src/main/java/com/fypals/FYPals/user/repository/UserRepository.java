@@ -8,6 +8,9 @@ import java.util.List;
 import java.util.Optional;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import com.fypals.FYPals.enums.Role;
+import java.util.List;
+
 
 
 public interface UserRepository extends JpaRepository<User, Long> {
@@ -16,7 +19,7 @@ public interface UserRepository extends JpaRepository<User, Long> {
 
     @Query("SELECT u FROM User u WHERE LOWER(u.name) LIKE LOWER(CONCAT('%', :keyword, '%')) OR LOWER(u.skills) LIKE LOWER(CONCAT('%', :keyword, '%'))")
     List<User> searchByKeyword(@Param("keyword") String keyword);
-
+    List<User> findByRole(Role role);
     Optional<User> findByEmail(String email);
     boolean existsByEmail(String email);
 }
