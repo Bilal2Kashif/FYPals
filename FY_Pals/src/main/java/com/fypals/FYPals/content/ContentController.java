@@ -7,6 +7,8 @@ import com.fypals.FYPals.enums.PostCategory;
 import com.fypals.FYPals.enums.VoteType;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetails;
@@ -14,8 +16,10 @@ import org.springframework.web.bind.annotation.*;
 import com.fypals.FYPals.user.repository.UserRepository;
 import jakarta.persistence.EntityNotFoundException;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/posts")
@@ -24,6 +28,40 @@ public class ContentController {
 
     private final ContentService contentService;
     private final UserRepository userRepository;
+
+    private String getAuthorName(Long authorId) {
+        return userRepository.findById(authorId)
+                .map(u -> u.getName())
+                .orElse("Unknown");
+    }
+
+    private Map<String, Object> postToMap(Post post) {
+        Map<String, Object> m = new HashMap<>();
+        m.put("id", post.getId());
+        m.put("authorId", post.getAuthorId());
+        m.put("authorName", getAuthorName(post.getAuthorId()));
+        m.put("title", post.getTitle());
+        m.put("description", post.getDescription());
+        m.put("category", post.getCategory());
+        m.put("voteCount", post.getVoteCount());
+        m.put("commentCount", post.getCommentCount());
+        m.put("createdAt", post.getCreatedAt());
+        m.put("updatedAt", post.getUpdatedAt());
+        m.put("upvoteCount", contentService.getUpvoteCount(post.getId()));
+        m.put("downvoteCount", contentService.getDownvoteCount(post.getId()));
+        return m;
+    }
+
+    private Map<String, Object> commentToMap(Comment comment) {
+        Map<String, Object> m = new HashMap<>();
+        m.put("id", comment.getId());
+        m.put("postId", comment.getPostId());
+        m.put("authorId", comment.getAuthorId());
+        m.put("authorName", getAuthorName(comment.getAuthorId()));
+        m.put("content", comment.getContent());
+        m.put("createdAt", comment.getCreatedAt());
+        return m;
+    }
 
     @PostMapping
     public ResponseEntity<?> createPost(
@@ -35,31 +73,54 @@ public class ContentController {
         String description = body.get("description").toString();
         PostCategory category = PostCategory.valueOf(body.get("category").toString());
         Post post = contentService.createPost(authorId, title, description, category);
-        return ResponseEntity.ok(Map.of("id", post.getId(), "title", post.getTitle(),
-                "description", post.getDescription(), "authorId", post.getAuthorId()));
+        return ResponseEntity.ok(postToMap(post));
     }
 
     @GetMapping
-    public ResponseEntity<Page<Post>> getAllPosts(
+    public ResponseEntity<?> getAllPosts(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size,
-            @RequestParam(defaultValue = "date") String sortBy) {
-        return ResponseEntity.ok(contentService.getAllPosts(page, size, sortBy));
+            @RequestParam(defaultValue = "date") String sortBy,
+            @RequestParam(required = false) String category) {
+        Page<Post> postsPage;
+        if (category != null && !category.isBlank()) {
+            postsPage = contentService.getPostsByCategory(PostCategory.valueOf(category), page, size);
+        } else {
+            postsPage = contentService.getAllPosts(page, size, sortBy);
+        }
+        List<Map<String, Object>> enriched = postsPage.getContent().stream()
+                .map(this::postToMap).collect(Collectors.toList());
+        Map<String, Object> result = new HashMap<>();
+        result.put("content", enriched);
+        result.put("totalElements", postsPage.getTotalElements());
+        result.put("totalPages", postsPage.getTotalPages());
+        result.put("number", postsPage.getNumber());
+        result.put("size", postsPage.getSize());
+        return ResponseEntity.ok(result);
     }
 
     @GetMapping("/{postId}")
     public ResponseEntity<?> getPost(@PathVariable Long postId) {
         Post post = contentService.getPost(postId);
         List<Comment> comments = contentService.getCommentsByPost(postId);
-        return ResponseEntity.ok(Map.of("post", post, "comments", comments));
+        List<Map<String, Object>> enrichedComments = comments.stream()
+                .map(this::commentToMap).collect(Collectors.toList());
+        Map<String, Object> result = new HashMap<>();
+        result.put("post", postToMap(post));
+        result.put("comments", enrichedComments);
+        return ResponseEntity.ok(result);
     }
 
     @GetMapping("/category/{category}")
-    public ResponseEntity<Page<Post>> getPostsByCategory(
+    public ResponseEntity<?> getPostsByCategory(
             @PathVariable PostCategory category,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size) {
-        return ResponseEntity.ok(contentService.getPostsByCategory(category, page, size));
+        Page<Post> postsPage = contentService.getPostsByCategory(category, page, size);
+        List<Map<String, Object>> enriched = postsPage.getContent().stream()
+                .map(this::postToMap).collect(Collectors.toList());
+        return ResponseEntity.ok(Map.of("content", enriched,
+                "totalElements", postsPage.getTotalElements()));
     }
 
     @PostMapping("/{postId}/comments")
@@ -71,13 +132,14 @@ public class ContentController {
                 .orElseThrow(() -> new EntityNotFoundException("User not found")).getId();
         String content = body.get("content").toString();
         Comment comment = contentService.addComment(postId, authorId, content);
-        return ResponseEntity.ok(Map.of("id", comment.getId(), "content", comment.getContent(),
-                "authorId", comment.getAuthorId(), "postId", comment.getPostId()));
+        return ResponseEntity.ok(commentToMap(comment));
     }
 
     @GetMapping("/{postId}/comments")
-    public ResponseEntity<List<Comment>> getComments(@PathVariable Long postId) {
-        return ResponseEntity.ok(contentService.getCommentsByPost(postId));
+    public ResponseEntity<?> getComments(@PathVariable Long postId) {
+        List<Map<String, Object>> enriched = contentService.getCommentsByPost(postId).stream()
+                .map(this::commentToMap).collect(Collectors.toList());
+        return ResponseEntity.ok(enriched);
     }
 
     @PostMapping("/{postId}/vote")
@@ -89,7 +151,11 @@ public class ContentController {
                 .orElseThrow(() -> new EntityNotFoundException("User not found")).getId();
         VoteType voteType = VoteType.valueOf(body.get("voteType").toString());
         Post post = contentService.voteOnPost(postId, userId, voteType);
-        return ResponseEntity.ok(Map.of("voteCount", post.getVoteCount()));
+        return ResponseEntity.ok(Map.of(
+                "voteCount", post.getVoteCount(),
+                "upvoteCount", contentService.getUpvoteCount(postId),
+                "downvoteCount", contentService.getDownvoteCount(postId)
+        ));
     }
 
     @PutMapping("/{postId}")
@@ -103,7 +169,7 @@ public class ContentController {
         String description = body.get("description").toString();
         PostCategory category = PostCategory.valueOf(body.get("category").toString());
         Post post = contentService.updatePost(postId, authorId, title, description, category);
-        return ResponseEntity.ok(Map.of("id", post.getId(), "title", post.getTitle()));
+        return ResponseEntity.ok(postToMap(post));
     }
 
     @DeleteMapping("/{postId}")
@@ -125,7 +191,7 @@ public class ContentController {
                 .orElseThrow(() -> new EntityNotFoundException("User not found")).getId();
         String content = body.get("content").toString();
         Comment comment = contentService.updateComment(commentId, authorId, content);
-        return ResponseEntity.ok(Map.of("id", comment.getId(), "content", comment.getContent()));
+        return ResponseEntity.ok(commentToMap(comment));
     }
 
     @DeleteMapping("/comments/{commentId}")

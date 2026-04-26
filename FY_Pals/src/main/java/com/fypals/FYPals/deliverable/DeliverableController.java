@@ -3,6 +3,7 @@ package com.fypals.FYPals.deliverable;
 import com.fypals.FYPals.deliverable.entity.Deliverable;
 import com.fypals.FYPals.deliverable.entity.Feedback;
 import com.fypals.FYPals.deliverable.repository.DeliverableRepository;
+import com.fypals.FYPals.deliverable.repository.FeedbackRepository;
 import com.fypals.FYPals.deliverable.service.DeliverableService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -21,6 +22,7 @@ public class DeliverableController {
 
     private final DeliverableService deliverableService;
     private final DeliverableRepository deliverableRepository;
+    private final FeedbackRepository feedbackRepository;
 
     @GetMapping
     @Transactional
@@ -40,6 +42,15 @@ public class DeliverableController {
                         .map(this::toMap)
                         .collect(Collectors.toList())
         );
+    }
+
+    @PostMapping("/project/{projectId}")
+    @Transactional
+    public ResponseEntity<Map<String, Object>> create(
+            @PathVariable Long projectId,
+            @RequestBody Map<String, String> body) {
+        Deliverable d = deliverableService.createDeliverable(projectId, body.get("title"), body.get("deadline"));
+        return ResponseEntity.ok(toMap(d));
     }
 
     @PostMapping("/{id}/submit")
@@ -81,6 +92,39 @@ public class DeliverableController {
         m.put("reminderSent", d.isReminderSent());
         m.put("projectId", d.getProject() != null ? d.getProject().getId() : null);
         m.put("submittedById", d.getSubmittedBy() != null ? d.getSubmittedBy().getId() : null);
+
+        // Return advisor feedback separately from staff comments
+        List<Feedback> allFeedback = feedbackRepository.findByDeliverableId(d.getId());
+
+        // Advisor feedback = has a decision (APPROVED / CHANGES_REQUESTED)
+        allFeedback.stream()
+                .filter(fb -> fb.getDecision() != null && !fb.getDecision().isBlank())
+                .findFirst()
+                .ifPresent(fb -> {
+                    Map<String, Object> fbMap = new HashMap<>();
+                    fbMap.put("id", fb.getId());
+                    fbMap.put("comment", fb.getComment());
+                    fbMap.put("decision", fb.getDecision());
+                    fbMap.put("createdAt", fb.getCreatedAt());
+                    m.put("feedback", fbMap);  // shown to students as advisor feedback
+                });
+
+        // Staff comments = no decision
+        List<Map<String, Object>> staffComments = allFeedback.stream()
+                .filter(fb -> fb.getDecision() == null || fb.getDecision().isBlank())
+                .map(fb -> {
+                    Map<String, Object> cm = new HashMap<>();
+                    cm.put("id", fb.getId());
+                    cm.put("comment", fb.getComment());
+                    cm.put("createdAt", fb.getCreatedAt());
+                    return cm;
+                })
+                .collect(java.util.stream.Collectors.toList());
+
+        if (!staffComments.isEmpty()) {
+            m.put("staffComments", staffComments);  // separate field for staff comments
+        }
+
         return m;
     }
 }

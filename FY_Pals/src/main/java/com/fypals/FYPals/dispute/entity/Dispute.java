@@ -18,6 +18,12 @@ public class Dispute {
     @Column(nullable = false)
     private Long raisedBy;
 
+    @Transient
+    private String raisedByName;
+
+    @Transient
+    private String resolvedByName;
+
     @Column(nullable = false, length = 500)
     private String targetItem;
 
@@ -28,6 +34,8 @@ public class Dispute {
     private DisputeStatus status;
 
     private String rejectionReason;
+
+    private String winningOption;
 
     private Long resolvedByDispute;
 
@@ -46,7 +54,6 @@ public class Dispute {
         this.createdAt = LocalDateTime.now();
     }
 
-    // Getters and Setters
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
 
@@ -55,6 +62,12 @@ public class Dispute {
 
     public Long getRaisedBy() { return raisedBy; }
     public void setRaisedBy(Long raisedBy) { this.raisedBy = raisedBy; }
+
+    public String getRaisedByName() { return raisedByName; }
+    public void setRaisedByName(String raisedByName) { this.raisedByName = raisedByName; }
+
+    public String getResolvedByName() { return resolvedByName; }
+    public void setResolvedByName(String resolvedByName) { this.resolvedByName = resolvedByName; }
 
     public String getTargetItem() { return targetItem; }
     public void setTargetItem(String targetItem) { this.targetItem = targetItem; }
@@ -67,6 +80,9 @@ public class Dispute {
 
     public String getRejectionReason() { return rejectionReason; }
     public void setRejectionReason(String rejectionReason) { this.rejectionReason = rejectionReason; }
+
+    public String getWinningOption() { return winningOption; }
+    public void setWinningOption(String winningOption) { this.winningOption = winningOption; }
 
     public Long getResolvedByDispute() { return resolvedByDispute; }
     public void setResolvedByDispute(Long resolvedByDispute) { this.resolvedByDispute = resolvedByDispute; }

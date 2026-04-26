@@ -18,6 +18,7 @@ public class ProfileResponse {
     private String skills;
     private Role role;
     private boolean profileComplete;
+    private Long teamId;
 
     // Student fields
     private Double gpa;

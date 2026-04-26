@@ -6,8 +6,11 @@ import com.fypals.FYPals.progress.repository.CheckpointRepository;
 import com.fypals.FYPals.progress.repository.PhaseRepository;
 import com.fypals.FYPals.progress.repository.ProjectRepository;
 import com.fypals.FYPals.progress.service.ProgressService;
+import com.fypals.FYPals.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
@@ -24,6 +27,7 @@ public class ProgressController {
     private final ProjectRepository projectRepository;
     private final PhaseRepository phaseRepository;
     private final CheckpointRepository checkpointRepository;
+    private final UserRepository userRepository;
 
     @GetMapping("/projects/{projectId}/progress")
     @Transactional
@@ -41,6 +45,36 @@ public class ProgressController {
             result.put("teamName", p.getTeam() != null ? p.getTeam().getTeamName() : null);
             return ResponseEntity.ok((Object) result);
         }).orElse(ResponseEntity.notFound().build());
+    }
+
+    @PutMapping("/projects/{projectId}/supervisor")
+    @Transactional
+    public ResponseEntity<?> assignSupervisor(
+            @PathVariable Long projectId,
+            @RequestParam Long advisorId) {
+        return projectRepository.findById(projectId).map(p -> {
+            p.setSupervisorId(advisorId);
+            projectRepository.save(p);
+            return ResponseEntity.ok(Map.of("message", "Supervisor assigned", "advisorId", advisorId));
+        }).orElse(ResponseEntity.notFound().build());
+    }
+
+    @GetMapping("/advisor/teams")
+    @Transactional
+    public ResponseEntity<?> getAdvisorTeams(@AuthenticationPrincipal UserDetails userDetails) {
+        Long advisorId = userRepository.findByEmail(userDetails.getUsername())
+                .orElseThrow(() -> new RuntimeException("User not found")).getId();
+        List<Map<String, Object>> result = projectRepository.findBySupervisorId(advisorId).stream()
+                .map(p -> {
+                    Map<String, Object> m = new HashMap<>();
+                    m.put("id", p.getTeam().getId());
+                    m.put("teamName", p.getTeam().getTeamName());
+                    m.put("status", p.getTeam().getStatus());
+                    m.put("project", Map.of("id", p.getId()));
+                    m.put("memberCount", p.getTeam().getMembers().size());
+                    return m;
+                }).toList();
+        return ResponseEntity.ok(result);
     }
 
     @PostMapping("/projects/{projectId}/phases")
