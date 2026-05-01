@@ -6,6 +6,7 @@ import com.fypals.FYPals.progress.repository.CheckpointRepository;
 import com.fypals.FYPals.progress.repository.PhaseRepository;
 import com.fypals.FYPals.progress.repository.ProjectRepository;
 import com.fypals.FYPals.progress.service.ProgressService;
+import com.fypals.FYPals.user.entity.User;
 import com.fypals.FYPals.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -23,35 +24,52 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class ProgressController {
 
-    private final ProgressService progressService;
-    private final ProjectRepository projectRepository;
-    private final PhaseRepository phaseRepository;
+    private final ProgressService      progressService;
+    private final ProjectRepository    projectRepository;
+    private final PhaseRepository      phaseRepository;
     private final CheckpointRepository checkpointRepository;
-    private final UserRepository userRepository;
+    private final UserRepository       userRepository;
 
     @GetMapping("/projects/{projectId}/progress")
     @Transactional
     public ResponseEntity<?> getProgress(@PathVariable Long projectId) {
         return projectRepository.findById(projectId).map(p -> {
             Map<String, Object> result = new HashMap<>();
-            result.put("id", p.getId());
-            result.put("description", p.getDescription());
-            result.put("status", p.getStatus());
+            result.put("id",                   p.getId());
+            result.put("description",          p.getDescription());
+            result.put("projectName",          p.getProjectName());
+            result.put("status",               p.getStatus());
             result.put("completionPercentage", p.getCompletionPercentage());
-            result.put("startDate", p.getStartDate());
-            result.put("endDate", p.getEndDate());
-            result.put("supervisorId", p.getSupervisorId());
-            result.put("teamId", p.getTeam() != null ? p.getTeam().getId() : null);
-            result.put("teamName", p.getTeam() != null ? p.getTeam().getTeamName() : null);
+            result.put("startDate",            p.getStartDate());
+            result.put("endDate",              p.getEndDate());
+            result.put("supervisorId",         p.getSupervisorId());
+            result.put("teamId",               p.getTeam() != null ? p.getTeam().getId() : null);
+            result.put("teamName",             p.getTeam() != null ? p.getTeam().getTeamName() : null);
+            return ResponseEntity.ok((Object) result);
+        }).orElse(ResponseEntity.notFound().build());
+    }
+
+    @PutMapping("/projects/{projectId}/progress")
+    @Transactional
+    public ResponseEntity<?> updateProjectDetails(
+            @PathVariable Long projectId,
+            @RequestBody Map<String, String> body) {
+        return projectRepository.findById(projectId).map(p -> {
+            if (body.get("description") != null) p.setDescription(body.get("description"));
+            if (body.get("projectName")  != null) p.setProjectName(body.get("projectName"));
+            projectRepository.save(p);
+            Map<String, Object> result = new HashMap<>();
+            result.put("id",          p.getId());
+            result.put("description", p.getDescription());
+            result.put("projectName", p.getProjectName());
+            result.put("message",     "Project updated successfully");
             return ResponseEntity.ok((Object) result);
         }).orElse(ResponseEntity.notFound().build());
     }
 
     @PutMapping("/projects/{projectId}/supervisor")
     @Transactional
-    public ResponseEntity<?> assignSupervisor(
-            @PathVariable Long projectId,
-            @RequestParam Long advisorId) {
+    public ResponseEntity<?> assignSupervisor(@PathVariable Long projectId, @RequestParam Long advisorId) {
         return projectRepository.findById(projectId).map(p -> {
             p.setSupervisorId(advisorId);
             projectRepository.save(p);
@@ -67,10 +85,14 @@ public class ProgressController {
         List<Map<String, Object>> result = projectRepository.findBySupervisorId(advisorId).stream()
                 .map(p -> {
                     Map<String, Object> m = new HashMap<>();
-                    m.put("id", p.getTeam().getId());
-                    m.put("teamName", p.getTeam().getTeamName());
-                    m.put("status", p.getTeam().getStatus());
-                    m.put("project", Map.of("id", p.getId()));
+                    m.put("id",          p.getTeam().getId());
+                    m.put("teamName",    p.getTeam().getTeamName());
+                    m.put("status",      p.getTeam().getStatus());
+                    Map<String, Object> proj = new HashMap<>();
+                    proj.put("id",          p.getId());
+                    proj.put("projectName", p.getProjectName());
+                    proj.put("description", p.getDescription());
+                    m.put("project",     proj);
                     m.put("memberCount", p.getTeam().getMembers().size());
                     return m;
                 }).toList();
@@ -79,19 +101,30 @@ public class ProgressController {
 
     @PostMapping("/projects/{projectId}/phases")
     @Transactional
-    public ResponseEntity<?> addPhase(
-            @PathVariable Long projectId,
-            @RequestBody Map<String, String> body) {
+    public ResponseEntity<?> addPhase(@PathVariable Long projectId, @RequestBody Map<String, String> body) {
+        if (body.get("startDate") == null || body.get("endDate") == null) {
+            throw new IllegalArgumentException("Start date and end date are required");
+        }
+        LocalDate startDate = LocalDate.parse(body.get("startDate"));
+        LocalDate endDate   = LocalDate.parse(body.get("endDate"));
+
+        // FIX 10: Validate start date is not strictly before today isn't required
+        // (past dates are allowed so advisors can set historical phases)
+        // BUT end date must be after start date
+        if (!startDate.isBefore(endDate)) {
+            throw new IllegalArgumentException("Start date must be before end date");
+        }
+
         Phase phase = new Phase();
         phase.setName(body.get("name"));
-        phase.setStartDate(LocalDate.parse(body.get("startDate")));
-        phase.setEndDate(LocalDate.parse(body.get("endDate")));
+        phase.setStartDate(startDate);
+        phase.setEndDate(endDate);
         Phase saved = progressService.addPhase(projectId, phase);
         Map<String, Object> result = new HashMap<>();
-        result.put("id", saved.getId());
-        result.put("name", saved.getName());
+        result.put("id",        saved.getId());
+        result.put("name",      saved.getName());
         result.put("startDate", saved.getStartDate());
-        result.put("endDate", saved.getEndDate());
+        result.put("endDate",   saved.getEndDate());
         result.put("projectId", projectId);
         return ResponseEntity.ok(result);
     }
@@ -100,56 +133,52 @@ public class ProgressController {
     @Transactional
     public ResponseEntity<?> getPhases(@PathVariable Long projectId) {
         List<Phase> phases = phaseRepository.findByProjectId(projectId);
-        List<Map<String, Object>> result = phases.stream().map(p -> {
+        return ResponseEntity.ok(phases.stream().map(p -> {
             Map<String, Object> m = new HashMap<>();
-            m.put("id", p.getId());
-            m.put("name", p.getName());
+            m.put("id",        p.getId());
+            m.put("name",      p.getName());
             m.put("startDate", p.getStartDate());
-            m.put("endDate", p.getEndDate());
+            m.put("endDate",   p.getEndDate());
             m.put("projectId", projectId);
             return m;
-        }).toList();
-        return ResponseEntity.ok(result);
+        }).toList());
     }
 
     @PostMapping("/phases/{phaseId}/checkpoints")
     @Transactional
-    public ResponseEntity<?> addCheckpoint(
-            @PathVariable Long phaseId,
-            @RequestBody Map<String, String> body) {
+    public ResponseEntity<?> addCheckpoint(@PathVariable Long phaseId, @RequestBody Map<String, String> body) {
         Phase phase = phaseRepository.findById(phaseId)
                 .orElseThrow(() -> new RuntimeException("Phase not found"));
+
+        String title = body.get("title");
+        if (title == null || title.trim().isEmpty()) {
+            throw new IllegalArgumentException("Checkpoint title cannot be empty");
+        }
+
         Checkpoint cp = new Checkpoint();
         cp.setPhase(phase);
-        cp.setTitle(body.get("title"));
-        cp.setStatus(body.getOrDefault("status", "PENDING"));
-        if (body.get("deadline") != null) {
+        cp.setTitle(title.trim());
+        cp.setStatus("TODO");
+
+        if (body.get("deadline") != null && !body.get("deadline").isEmpty()) {
             cp.setDeadline(LocalDate.parse(body.get("deadline")));
         }
+        if (body.get("assignedToId") != null && !body.get("assignedToId").isEmpty()) {
+            userRepository.findById(Long.valueOf(body.get("assignedToId"))).ifPresent(cp::setAssignedTo);
+        }
+
         Checkpoint saved = checkpointRepository.save(cp);
-        Map<String, Object> result = new HashMap<>();
-        result.put("id", saved.getId());
-        result.put("title", saved.getTitle());
-        result.put("status", saved.getStatus());
-        result.put("deadline", saved.getDeadline());
-        result.put("phaseId", phaseId);
-        return ResponseEntity.ok(result);
+        return ResponseEntity.ok(toCheckpointMap(saved, phaseId));
     }
 
     @GetMapping("/phases/{phaseId}/checkpoints")
     @Transactional
     public ResponseEntity<?> getCheckpoints(@PathVariable Long phaseId) {
-        List<Checkpoint> cps = checkpointRepository.findByPhaseId(phaseId);
-        List<Map<String, Object>> result = cps.stream().map(c -> {
-            Map<String, Object> m = new HashMap<>();
-            m.put("id", c.getId());
-            m.put("title", c.getTitle());
-            m.put("status", c.getStatus());
-            m.put("deadline", c.getDeadline());
-            m.put("phaseId", phaseId);
-            return m;
-        }).toList();
-        return ResponseEntity.ok(result);
+        return ResponseEntity.ok(
+                checkpointRepository.findByPhaseId(phaseId).stream()
+                        .map(c -> toCheckpointMap(c, phaseId))
+                        .toList()
+        );
     }
 
     @PutMapping("/checkpoints/{checkpointId}/status")
@@ -159,11 +188,30 @@ public class ProgressController {
             @RequestParam String status,
             @RequestParam String callerRole) {
         Checkpoint cp = progressService.updateCheckpointStatus(checkpointId, status, callerRole);
-        Map<String, Object> result = new HashMap<>();
-        result.put("id", cp.getId());
-        result.put("title", cp.getTitle());
-        result.put("status", cp.getStatus());
-        result.put("deadline", cp.getDeadline());
-        return ResponseEntity.ok(result);
+        return ResponseEntity.ok(toCheckpointMap(cp, cp.getPhase().getId()));
+    }
+
+    @PutMapping("/checkpoints/{checkpointId}/assign")
+    @Transactional
+    public ResponseEntity<?> assignCheckpoint(@PathVariable Long checkpointId, @RequestParam Long assignedToId) {
+        Checkpoint cp = checkpointRepository.findById(checkpointId)
+                .orElseThrow(() -> new RuntimeException("Checkpoint not found"));
+        User assignee = userRepository.findById(assignedToId)
+                .orElseThrow(() -> new RuntimeException("User not found"));
+        cp.setAssignedTo(assignee);
+        checkpointRepository.save(cp);
+        return ResponseEntity.ok(toCheckpointMap(cp, cp.getPhase().getId()));
+    }
+
+    private Map<String, Object> toCheckpointMap(Checkpoint c, Long phaseId) {
+        Map<String, Object> m = new HashMap<>();
+        m.put("id",             c.getId());
+        m.put("title",          c.getTitle());
+        m.put("status",         c.getStatus());
+        m.put("deadline",       c.getDeadline());
+        m.put("phaseId",        phaseId);
+        m.put("assignedToId",   c.getAssignedTo() != null ? c.getAssignedTo().getId()   : null);
+        m.put("assignedToName", c.getAssignedTo() != null ? c.getAssignedTo().getName() : null);
+        return m;
     }
 }

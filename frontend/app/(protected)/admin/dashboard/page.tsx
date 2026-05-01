@@ -73,9 +73,9 @@ export default function AdminDashboardPage() {
       </div>
 
       <div className="flex gap-3">
-        <Button asChild variant="outline"><Link href="/admin/users">Manage Users</Link></Button>
-        <Button asChild variant="outline"><Link href="/admin/teams">Manage Teams</Link></Button>
-        <Button asChild variant="outline"><Link href="/admin/posts">Manage Posts</Link></Button>
+        <Button asChild variant="outline"><Link href="/admin/users">View Users</Link></Button>
+        <Button asChild variant="outline"><Link href="/admin/teams">View Teams</Link></Button>
+        <Button asChild variant="outline"><Link href="/admin/posts">View Posts</Link></Button>
       </div>
     </div>
   );

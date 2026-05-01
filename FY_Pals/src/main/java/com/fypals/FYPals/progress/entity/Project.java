@@ -21,6 +21,13 @@ public class Project {
     @JoinColumn(name = "team_id")
     private Team team;
 
+    /**
+     * NEW: Human-readable project name (e.g. "Smart Campus Management System").
+     * Separate from description so both can be shown in the Overview tab.
+     */
+    @Column(name = "project_name")
+    private String projectName;
+
     @Column(columnDefinition = "TEXT")
     private String description;
 

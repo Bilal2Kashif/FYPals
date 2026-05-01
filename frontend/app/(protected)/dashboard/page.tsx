@@ -3,12 +3,13 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Users, FileText, Search, AlertCircle } from 'lucide-react';
+import { Users, FileText, Search, AlertCircle, Sparkles, UserCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { formatTimeAgo } from '@/lib/utils';
 import api from '@/lib/api';
 import { useAuthStore } from '@/store/authStore';
@@ -17,28 +18,44 @@ import type { User, Notification } from '@/types';
 export default function DashboardPage() {
   const { user: authUser } = useAuthStore();
   const router = useRouter();
-  const [profile, setProfile] = useState<User | null>(null);
+  const [profile, setProfile]             = useState<User | null>(null);
   const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [matches, setMatches]             = useState<any[]>([]);
+  const [loading, setLoading]             = useState(true);
 
   useEffect(() => {
-    if (authUser?.role === 'ADMIN') {
-      router.replace('/admin/dashboard');
-      return;
-    }
-    if (authUser?.role === 'ADVISOR') {
-      router.replace('/advisor/dashboard');
-      return;
-    }
+    if (authUser?.role === 'ADMIN') { router.replace('/admin/dashboard'); return; }
+    if (authUser?.role === 'ADVISOR') { router.replace('/advisor/dashboard'); return; }
+    if (authUser?.role === 'FYP_STAFF') { router.replace('/fyp-staff/dashboard'); return; }
 
     const load = async () => {
       try {
         const [p, n] = await Promise.all([
           api.get('/users/me/profile') as unknown as Promise<User>,
-          api.get('/notifications', { params: { size: 5 } }) as unknown as Promise<Notification[]>,
+          api.get('/notifications') as unknown as Promise<Notification[]>,
         ]);
         setProfile(p);
-        setNotifications(Array.isArray(n) ? n : (n as any)?.content ?? []);
+        setNotifications(Array.isArray(n) ? n.slice(0, 5) : []);
+
+        // Feature 8: Match with students of similar interests/skills
+        // Search using the user's own skills/interests as keyword
+        if (p?.skills || p?.interests) {
+          const keyword = (p.skills || p.interests || '').split(',')[0]?.trim();
+          if (keyword) {
+            try {
+              const searchRes = await api.get('/search', {
+                params: { q: keyword, type: 'student' },
+              }) as any[];
+              // Filter out self, limit to 4 matches
+              const filtered = (Array.isArray(searchRes) ? searchRes : [])
+                  .filter((r: any) => r.id !== p.id)
+                  .slice(0, 4);
+              setMatches(filtered);
+            } catch {
+              // Silently ignore match failures
+            }
+          }
+        }
       } catch (err: any) {
         toast.error(err?.response?.data?.message ?? 'Failed to load dashboard');
       } finally {
@@ -53,30 +70,35 @@ export default function DashboardPage() {
         <div className="space-y-6">
           <Skeleton className="h-28 w-full" />
           <div className="grid grid-cols-3 gap-4">
-            <Skeleton className="h-24" />
-            <Skeleton className="h-24" />
-            <Skeleton className="h-24" />
+            <Skeleton className="h-24" /><Skeleton className="h-24" /><Skeleton className="h-24" />
           </div>
           <Skeleton className="h-48 w-full" />
         </div>
     );
   }
 
+  const unreadNotifications = notifications.filter(n => !n.read);
+
   return (
       <div className="space-y-6 max-w-4xl">
+        {/* Welcome */}
         <div>
           <h1 className="text-2xl font-bold">Welcome back, {profile?.name ?? authUser?.name}!</h1>
           <p className="text-muted-foreground mt-1">
             Role: <Badge variant="secondary">{profile?.role ?? authUser?.role}</Badge>
+            {profile?.teamId && (
+                <span className="ml-2 text-sm">· <Link href={`/teams/${profile.teamId}`} className="text-primary hover:underline">Go to your team →</Link></span>
+            )}
           </p>
         </div>
 
-        {profile && !profile.profileComplete && (
+        {/* Profile incomplete alert — students only */}
+        {profile && !profile.profileComplete && profile.role === 'STUDENT' && (
             <div className="flex items-start gap-3 p-4 rounded-lg border border-amber-200 bg-amber-50 text-amber-800">
               <AlertCircle className="h-5 w-5 shrink-0 mt-0.5" />
               <div>
                 <p className="font-medium">Complete your profile</p>
-                <p className="text-sm mt-1">Add your skills, GPA, and bio to help others find you.</p>
+                <p className="text-sm mt-1">Add your skills, GPA, and interests — this helps with team matching!</p>
                 <Button size="sm" variant="outline" asChild className="mt-2 border-amber-300 hover:bg-amber-100">
                   <Link href={`/profile/${authUser?.id}`}>Edit Profile</Link>
                 </Button>
@@ -84,45 +106,87 @@ export default function DashboardPage() {
             </div>
         )}
 
+        {/* Quick actions */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <Card className="hover:shadow-md transition-shadow">
             <CardContent className="p-4">
               <Link href="/teams" className="flex flex-col items-center gap-2 text-center">
-                <div className="p-3 rounded-full bg-primary/10">
-                  <Users className="h-6 w-6 text-primary" />
-                </div>
+                <div className="p-3 rounded-full bg-primary/10"><Users className="h-6 w-6 text-primary" /></div>
                 <p className="font-medium">My Team</p>
-                <p className="text-xs text-muted-foreground">View or form your team</p>
+                <p className="text-xs text-muted-foreground">
+                  {profile?.teamId ? 'View your team workspace' : 'Form or join a team'}
+                </p>
               </Link>
             </CardContent>
           </Card>
           <Card className="hover:shadow-md transition-shadow">
             <CardContent className="p-4">
               <Link href="/posts" className="flex flex-col items-center gap-2 text-center">
-                <div className="p-3 rounded-full bg-blue-100">
-                  <FileText className="h-6 w-6 text-blue-600" />
-                </div>
+                <div className="p-3 rounded-full bg-blue-100"><FileText className="h-6 w-6 text-blue-600" /></div>
                 <p className="font-medium">Browse Posts</p>
-                <p className="text-xs text-muted-foreground">Explore ideas and projects</p>
+                <p className="text-xs text-muted-foreground">Ideas, requirements, member hunts</p>
               </Link>
             </CardContent>
           </Card>
           <Card className="hover:shadow-md transition-shadow">
             <CardContent className="p-4">
               <Link href="/search" className="flex flex-col items-center gap-2 text-center">
-                <div className="p-3 rounded-full bg-green-100">
-                  <Search className="h-6 w-6 text-green-600" />
-                </div>
-                <p className="font-medium">Search Students</p>
-                <p className="text-xs text-muted-foreground">Find teammates by skills</p>
+                <div className="p-3 rounded-full bg-green-100"><Search className="h-6 w-6 text-green-600" /></div>
+                <p className="font-medium">Find People</p>
+                <p className="text-xs text-muted-foreground">Search students & advisors by skills</p>
               </Link>
             </CardContent>
           </Card>
         </div>
 
+        {/* Feature 8: Suggested Matches */}
+        {matches.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Sparkles className="h-4 w-4 text-amber-500" />
+                  Suggested Matches
+                  <span className="text-xs font-normal text-muted-foreground">(based on your skills)</span>
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {matches.map((m: any) => (
+                      <Link key={m.id} href={`/profile/${m.id}`} className="flex items-center gap-3 p-3 border rounded-lg hover:bg-muted/50 transition-colors">
+                        <Avatar className="h-9 w-9 shrink-0">
+                          <AvatarFallback className="text-xs">
+                            {m.title?.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase()}
+                          </AvatarFallback>
+                        </Avatar>
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium truncate">{m.title}</p>
+                          {m.description && (
+                              <p className="text-xs text-muted-foreground truncate">{m.description}</p>
+                          )}
+                          <Badge variant="outline" className="text-xs mt-0.5">
+                            <UserCheck className="h-2.5 w-2.5 mr-1" />
+                            {m.type === 'student' ? 'Student' : 'Advisor'}
+                          </Badge>
+                        </div>
+                      </Link>
+                  ))}
+                </div>
+                <Button variant="ghost" size="sm" asChild className="mt-3 w-full">
+                  <Link href="/search">Search more people →</Link>
+                </Button>
+              </CardContent>
+            </Card>
+        )}
+
+        {/* Recent Notifications */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Recent Notifications</CardTitle>
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base">Recent Notifications</CardTitle>
+              {unreadNotifications.length > 0 && (
+                  <Badge variant="secondary">{unreadNotifications.length} unread</Badge>
+              )}
+            </div>
           </CardHeader>
           <CardContent className="space-y-2">
             {notifications.length === 0 ? (

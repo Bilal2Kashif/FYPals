@@ -40,4 +40,7 @@ public class Deliverable {
 
     @Builder.Default
     private boolean reminderSent = false;
+
+    @Column(name = "resubmission_comment", length = 2000)
+    private String resubmissionComment;
 }

@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { toast } from 'sonner';
-import { GraduationCap } from 'lucide-react';
+import { GraduationCap, ClipboardList } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -21,17 +21,22 @@ interface AdvisorItem {
 }
 
 export default function FYPStaffDashboardPage() {
-    const { user } = useAuthStore();
-    const [advisors, setAdvisors] = useState<AdvisorItem[]>([]);
-    const [loading, setLoading]   = useState(true);
+    const { user: authUser } = useAuthStore();
+    const [profile, setProfile]     = useState<any>(null);
+    const [advisors, setAdvisors]   = useState<AdvisorItem[]>([]);
+    const [loading, setLoading]     = useState(true);
 
     useEffect(() => {
         const load = async () => {
             try {
-                const data = await api.get('/fyp-staff/advisors') as any;
+                const [p, data] = await Promise.all([
+                    api.get('/users/me/profile') as any,
+                    api.get('/fyp-staff/advisors') as any,
+                ]);
+                setProfile(p);
                 setAdvisors(Array.isArray(data) ? data : data?.data ?? []);
             } catch (err: any) {
-                toast.error(err?.response?.data?.message ?? 'Failed to load advisors');
+                toast.error(err?.response?.data?.message ?? 'Failed to load dashboard');
             } finally {
                 setLoading(false);
             }
@@ -39,16 +44,45 @@ export default function FYPStaffDashboardPage() {
         load();
     }, []);
 
+    const profileComplete = profile?.profileComplete ?? false;
+
     return (
         <div className="max-w-3xl space-y-6">
-
             {/* Welcome card */}
             <Card>
                 <CardContent className="p-6">
-                    <h1 className="text-2xl font-bold">Welcome, {user?.name}</h1>
-                    <p className="text-muted-foreground">FYP Office Staff — Review deliverable submissions</p>
+                    <h1 className="text-2xl font-bold">Welcome, {profile?.name ?? authUser?.name}</h1>
+                    <p className="text-muted-foreground">
+                        {profile?.designation
+                            ? `FYP Office Staff — ${profile.designation}`
+                            : 'FYP Office Staff — Review deliverable submissions'}
+                    </p>
                 </CardContent>
             </Card>
+
+            {/* FYP Staff profile completion banner — staff-specific wording */}
+            {!profileComplete && (
+                <div className="flex items-start gap-3 p-4 rounded-lg border border-purple-200 bg-purple-50 text-purple-800">
+                    <ClipboardList className="h-5 w-5 shrink-0 mt-0.5" />
+                    <div>
+                        <p className="font-medium">Set up your staff profile</p>
+                        <p className="text-sm mt-1">
+                            Add your designation (e.g. FYP Coordinator) so the system can properly identify your role.
+                            This helps teams and advisors know who is reviewing their submissions.
+                        </p>
+                        <Button
+                            size="sm"
+                            variant="outline"
+                            asChild
+                            className="mt-2 border-purple-300 hover:bg-purple-100"
+                        >
+                            <Link href={`/profile/${profile?.id ?? authUser?.id}`}>
+                                Complete Staff Profile
+                            </Link>
+                        </Button>
+                    </div>
+                </div>
+            )}
 
             {/* Stats */}
             <div className="grid grid-cols-1 gap-4">

@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useParams } from 'next/navigation';
-import { ArrowLeft, Loader2, PlusCircle } from 'lucide-react';
+import { ArrowLeft, Loader2, PlusCircle, Lock } from 'lucide-react';
 import { toast } from 'sonner';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
@@ -33,7 +33,7 @@ function formatDate(raw: string | null | undefined): string {
       day: 'numeric', month: 'short', year: 'numeric',
     });
   } catch {
-    return raw;
+    return String(raw);
   }
 }
 
@@ -45,7 +45,7 @@ function formatDateTime(raw: string | null | undefined): string {
       hour: '2-digit', minute: '2-digit',
     });
   } catch {
-    return raw;
+    return String(raw);
   }
 }
 
@@ -56,12 +56,19 @@ const STATUS_VARIANTS: Record<string, any> = {
   CHANGES_REQUESTED:  'destructive',
 };
 
+const STATUS_COLORS: Record<string, string> = {
+  PENDING: 'bg-gray-100 text-gray-600',
+  SUBMITTED: 'bg-blue-100 text-blue-700',
+  APPROVED: 'bg-green-100 text-green-700',
+  CHANGES_REQUESTED: 'bg-red-100 text-red-700',
+};
+
 export default function AdvisorTeamPage() {
   const { id } = useParams<{ id: string }>();
   const [team, setTeam]               = useState<Team | null>(null);
   const [progress, setProgress]       = useState<ProjectProgress | null>(null);
-  const [phases, setPhases]           = useState<Phase[]>([]);
   const [deliverables, setDeliverables] = useState<Deliverable[]>([]);
+  const [phasesMap, setPhasesMap]     = useState<Record<number, Phase[]>>({});
   const [loading, setLoading]         = useState(true);
 
   // Feedback state
@@ -76,28 +83,79 @@ export default function AdvisorTeamPage() {
   const [creating, setCreating]       = useState(false);
   const [createForm, setCreateForm]   = useState({ title: '', deadline: '' });
 
-  const load = async () => {
+  // View submission popup
+  const [viewOpen, setViewOpen]       = useState<any | null>(null);
+
+  const load = useCallback(async () => {
     try {
       const t = await api.get(`/teams/${id}`) as unknown as Team;
       setTeam(t);
       if (t.project?.id) {
-        const [prog, ph, delivs] = await Promise.all([
+        const [prog, allPhases, delivs] = await Promise.all([
           api.get(`/projects/${t.project.id}/progress`) as unknown as ProjectProgress,
           api.get(`/projects/${t.project.id}/phases`)   as unknown as Phase[],
           api.get(`/deliverables/project/${t.project.id}`) as unknown as Deliverable[],
         ]);
         setProgress(prog);
-        setPhases(Array.isArray(ph) ? ph : (ph as any)?.phases ?? []);
-        setDeliverables(Array.isArray(delivs) ? delivs : []);
+
+        const phaseList = Array.isArray(allPhases) ? allPhases : (allPhases as any)?.phases ?? [];
+        const delivList = Array.isArray(delivs) ? delivs : [];
+        setDeliverables(delivList);
+
+        // Enrich phases with checkpoints
+        const enriched: Phase[] = await Promise.all(
+            phaseList.map(async (ph: any) => {
+              try {
+                const cps = await api.get(`/phases/${ph.id}/checkpoints`) as any;
+                return { ...ph, checkpoints: Array.isArray(cps) ? cps : [] };
+              } catch { return { ...ph, checkpoints: [] }; }
+            })
+        );
+
+        // Build phasesMap — same logic as student side
+        const newMap: Record<number, Phase[]> = {};
+        delivList.forEach((d: any) => { newMap[d.id] = []; });
+
+        const hasDeliverableId = enriched.some((ph: any) => ph.deliverableId != null);
+        if (hasDeliverableId) {
+          enriched.forEach((ph: any) => {
+            if (ph.deliverableId && newMap[ph.deliverableId]) {
+              newMap[ph.deliverableId].push(ph);
+            } else {
+              const active = delivList.find((d: any) => d.status !== 'APPROVED') ?? delivList[delivList.length - 1];
+              if (active) newMap[active.id].push(ph);
+            }
+          });
+        } else {
+          // FIX: distribute phases by order so approved deliverables keep their phases
+          const sortedPhases = [...enriched].sort((a: any, b: any) => a.id - b.id);
+          const approvedDelivs = delivList.filter((d: any) => d.status === 'APPROVED');
+          const activeDeliverable = delivList.find((d: any) => d.status !== 'APPROVED')
+              ?? delivList[delivList.length - 1];
+          if (approvedDelivs.length === 0 || delivList.length === 1) {
+            if (activeDeliverable) newMap[activeDeliverable.id] = sortedPhases;
+          } else {
+            const phasesPerDeliv = Math.floor(sortedPhases.length / delivList.length);
+            let phaseIdx = 0;
+            delivList.forEach((d: any, i: number) => {
+              const isLast = i === delivList.length - 1;
+              const count = isLast ? sortedPhases.length - phaseIdx : phasesPerDeliv;
+              newMap[d.id] = sortedPhases.slice(phaseIdx, phaseIdx + count);
+              phaseIdx += count;
+            });
+          }
+        }
+
+        setPhasesMap(newMap);
       }
     } catch (err: any) {
       toast.error(err?.response?.data?.message ?? 'Failed to load team');
     } finally {
       setLoading(false);
     }
-  };
+  }, [id]);
 
-  useEffect(() => { load(); }, [id]);
+  useEffect(() => { load(); }, [load]);
 
   const submitFeedback = async (deliverableId: number) => {
     setSubmitting(true);
@@ -151,7 +209,7 @@ export default function AdvisorTeamPage() {
 
   if (!team) return <p className="text-muted-foreground">Team not found.</p>;
 
-  const pct = progress?.completionPercent ?? 0;
+  const pct = progress?.completionPercent ?? (progress as any)?.completionPercentage ?? 0;
 
   return (
       <div className="max-w-4xl space-y-4">
@@ -196,28 +254,67 @@ export default function AdvisorTeamPage() {
             </Card>
           </TabsContent>
 
-          {/* ── Progress tab ── */}
+          {/* ── Progress tab ── deliverable-based boxes (read-only) ── */}
           <TabsContent value="progress" className="space-y-4">
             <Card>
               <CardContent className="p-4 space-y-2">
                 <div className="flex justify-between items-center">
                   <p className="text-sm font-medium">Overall Progress</p>
-                  <span className="font-bold text-lg">{pct}%</span>
+                  <span className="font-bold text-lg">{Math.round(pct)}%</span>
                 </div>
                 <Progress value={pct} />
               </CardContent>
             </Card>
-            {phases.length === 0 && (
-                <p className="text-sm text-muted-foreground">No phases yet.</p>
+
+            {deliverables.length === 0 && (
+                <p className="text-sm text-muted-foreground">No deliverables yet. Create one in the Deliverables tab.</p>
             )}
-            {phases.map((phase) => (
-                <div key={phase.id} className="space-y-1">
-                  <p className="text-xs text-muted-foreground px-1">
-                    {formatDate((phase as any).startDate)} → {formatDate((phase as any).endDate)}
-                  </p>
-                  <PhaseCard phase={phase} isLeader={false} callerRole="ADVISOR" readOnly />
-                </div>
-            ))}
+
+            {/* Show each deliverable as a box with its phases inside — matches student view */}
+            {deliverables.map((d: any) => {
+              const isApproved = d.status === 'APPROVED';
+              const phases = phasesMap[d.id] ?? [];
+
+              return (
+                  <div key={d.id} className={`border rounded-xl overflow-hidden ${isApproved ? '' : 'shadow-sm'}`}>
+                    {/* Deliverable header */}
+                    <div className={`px-4 py-3 flex items-center justify-between ${
+                        isApproved
+                            ? 'bg-green-50 border-b border-green-100'
+                            : 'bg-primary/5 border-b border-primary/10'
+                    }`}>
+                      <div className="flex items-center gap-2">
+                        {isApproved && <Lock className="h-4 w-4 text-green-600" />}
+                        <div>
+                          <p className="font-semibold text-sm">{d.title}</p>
+                          <p className="text-xs text-muted-foreground">Deadline: {formatDate(d.deadline)}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_COLORS[d.status] ?? 'bg-gray-100'}`}>
+                          {d.status?.replace('_', ' ')}
+                        </span>
+                        {isApproved && <span className="text-xs text-green-600 font-medium">✓ Completed</span>}
+                      </div>
+                    </div>
+
+                    {/* Phases inside this deliverable — read-only for advisor */}
+                    <div className="p-4 space-y-3">
+                      {phases.length === 0 && (
+                          <p className="text-sm text-muted-foreground italic">No phases added for this deliverable.</p>
+                      )}
+                      {phases.map((phase: any) => (
+                          <div key={phase.id} className="space-y-1">
+                            <p className="text-xs text-muted-foreground px-1">
+                              {formatDate(phase.startDate)} → {formatDate(phase.endDate)}
+                            </p>
+                            <PhaseCard phase={phase} isLeader={false} callerRole="ADVISOR" readOnly />
+                          </div>
+                      ))}
+                    </div>
+                  </div>
+              );
+            })}
           </TabsContent>
 
           {/* ── Deliverables tab ── */}
@@ -267,30 +364,29 @@ export default function AdvisorTeamPage() {
                 </p>
             )}
 
-            {deliverables.map((d) => (
+            {deliverables.map((d: any) => (
                 <Card key={d.id}>
                   <CardContent className="p-4 space-y-3">
                     <div className="flex items-start justify-between gap-2">
-                      <div>
+                      <div className="space-y-1">
                         <p className="font-medium">{d.title}</p>
-                        {/* Formatted deadline */}
                         <p className="text-xs text-muted-foreground">
                           Deadline: {formatDate(d.deadline as any)}
                         </p>
-                        {(d as any).submittedAt && (
+                        {d.submittedAt && (
                             <p className="text-xs text-muted-foreground">
-                              Submitted: {formatDateTime((d as any).submittedAt)}
+                              Submitted: {formatDateTime(d.submittedAt)}
                             </p>
                         )}
+                        {/* View Submission — opens popup with link + resubmission comment if any */}
                         {d.googleDriveLink && (
-                            <a
-                                href={d.googleDriveLink}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-xs text-primary underline"
+                            <button
+                                type="button"
+                                onClick={() => setViewOpen(d)}
+                                className="text-xs text-primary underline hover:no-underline"
                             >
                               View Submission
-                            </a>
+                            </button>
                         )}
                       </div>
                       <div className="flex flex-col items-end gap-2">
@@ -299,7 +395,10 @@ export default function AdvisorTeamPage() {
                         {d.status === 'SUBMITTED' && (
                             <Dialog
                                 open={feedbackOpen === d.id}
-                                onOpenChange={(o) => setFeedbackOpen(o ? d.id : null)}
+                                onOpenChange={(o) => {
+                                  setFeedbackOpen(o ? d.id : null);
+                                  if (o) setFeedbackForm({ comment: '', decision: 'APPROVED' });
+                                }}
                             >
                               <DialogTrigger asChild>
                                 <Button size="sm">Give Feedback</Button>
@@ -364,6 +463,53 @@ export default function AdvisorTeamPage() {
             ))}
           </TabsContent>
         </Tabs>
+
+        {/* View Submission / Resubmission popup */}
+        {viewOpen && (
+            <Dialog open={true} onOpenChange={(o) => { if (!o) setViewOpen(null); }}>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>
+                    Submission — {viewOpen.title}
+                  </DialogTitle>
+                </DialogHeader>
+                <div className="space-y-3">
+                  <div>
+                    <p className="text-xs font-medium text-muted-foreground mb-1">Google Drive Link</p>
+                    <a
+                        href={viewOpen.googleDriveLink}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-sm text-primary underline break-all"
+                    >
+                      {viewOpen.googleDriveLink}
+                    </a>
+                  </div>
+                  {viewOpen.submittedAt && (
+                      <p className="text-xs text-muted-foreground">Submitted: {formatDateTime(viewOpen.submittedAt)}</p>
+                  )}
+                  {viewOpen.resubmissionComment && (
+                      <div className="p-3 rounded-md bg-blue-50 border border-blue-200">
+                        <p className="text-xs font-medium text-blue-700 mb-1">Student&apos;s resubmission comment</p>
+                        <p className="text-sm text-blue-900">{viewOpen.resubmissionComment}</p>
+                      </div>
+                  )}
+                </div>
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setViewOpen(null)}>Close</Button>
+                  <Button asChild>
+                    <a
+                        href={viewOpen.googleDriveLink}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                    >
+                      Open in Drive
+                    </a>
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+        )}
       </div>
   );
 }

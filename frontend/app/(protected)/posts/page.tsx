@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Plus, Loader2 } from 'lucide-react';
+import { Plus, Loader2, TrendingUp, Clock } from 'lucide-react';
 import { toast } from 'sonner';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -14,41 +14,48 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { PostCard, PostCardSkeleton } from '@/components/shared/PostCard';
 import api from '@/lib/api';
-import type { Post, Page, PostCategory } from '@/types';
 
-const CATEGORIES: { value: PostCategory; label: string }[] = [
-  { value: 'LOOKING_FOR_MEMBER', label: 'Looking for Member' },
-  { value: 'PROJECT_IDEA', label: 'Project Idea' },
-  { value: 'GENERAL', label: 'General' },
+// All 5 backend categories
+const CATEGORIES = [
+  { value: 'LOOKING_FOR_MEMBER',  label: 'Looking for Member',  color: 'bg-green-100 text-green-700' },
+  { value: 'LOOKING_FOR_ADVISOR', label: 'Looking for Advisor', color: 'bg-purple-100 text-purple-700' },
+  { value: 'PROJECT_IDEA',        label: 'Project Idea',        color: 'bg-blue-100 text-blue-700' },
+  { value: 'REQUIREMENT',         label: 'Requirement',         color: 'bg-amber-100 text-amber-700' },
+  { value: 'GENERAL',             label: 'General',             color: 'bg-gray-100 text-gray-700' },
 ];
 
+type CategoryValue = typeof CATEGORIES[number]['value'];
+
 const createSchema = z.object({
-  title: z.string().min(3, 'Title too short'),
-  description: z.string().min(10, 'Description too short'),
-  category: z.enum(['LOOKING_FOR_MEMBER', 'PROJECT_IDEA', 'GENERAL']),
+  title:       z.string().min(3, 'Title must be at least 3 characters'),
+  description: z.string().min(10, 'Description must be at least 10 characters'),
+  category:    z.string().min(1, 'Category is required'),
 });
 type CreateValues = z.infer<typeof createSchema>;
 
+type SortMode = 'date' | 'votes';
+
 export default function PostsPage() {
-  const [posts, setPosts] = useState<Post[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [creating, setCreating] = useState(false);
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [categoryFilter, setCategoryFilter] = useState<PostCategory | 'ALL'>('ALL');
-  const [page, setPage] = useState(0);
-  const [totalPages, setTotalPages] = useState(1);
-  const [selectedCategory, setSelectedCategory] = useState<PostCategory>('GENERAL');
+  const [posts, setPosts]               = useState<any[]>([]);
+  const [loading, setLoading]           = useState(true);
+  const [creating, setCreating]         = useState(false);
+  const [dialogOpen, setDialogOpen]     = useState(false);
+  const [categoryFilter, setCategoryFilter] = useState<CategoryValue | 'ALL'>('ALL');
+  const [sortMode, setSortMode]         = useState<SortMode>('date');
+  const [page, setPage]                 = useState(0);
+  const [totalPages, setTotalPages]     = useState(1);
+  const [selectedCategory, setSelectedCategory] = useState<CategoryValue>('GENERAL');
 
   const { register, handleSubmit, reset, setValue, formState: { errors } } = useForm<CreateValues>({
     resolver: zodResolver(createSchema),
     defaultValues: { category: 'GENERAL' },
   });
 
-  const load = async (pg = 0) => {
+  const load = async (pg = 0, cat = categoryFilter, sort = sortMode) => {
     setLoading(true);
     try {
-      const params: Record<string, any> = { page: pg, size: 10 };
-      if (categoryFilter !== 'ALL') params.category = categoryFilter;
+      const params: Record<string, any> = { page: pg, size: 10, sortBy: sort };
+      if (cat !== 'ALL') params.category = cat;
       const data = await api.get('/posts', { params }) as any;
       if (data && Array.isArray(data.content)) {
         setPosts(data.content);
@@ -64,11 +71,11 @@ export default function PostsPage() {
     }
   };
 
-  useEffect(() => { load(0); }, [categoryFilter]);
+  useEffect(() => { load(0, categoryFilter, sortMode); }, [categoryFilter, sortMode]);
 
   const handleVote = (postId: number, voteCount: number, upvoteCount: number, downvoteCount: number) => {
     setPosts((prev) => prev.map((p) =>
-        p.id === postId ? { ...p, voteCount, upvoteCount, downvoteCount } as any : p
+        p.id === postId ? { ...p, voteCount, upvoteCount, downvoteCount } : p
     ));
   };
 
@@ -76,10 +83,11 @@ export default function PostsPage() {
     setCreating(true);
     try {
       await api.post('/posts', data);
-      toast.success('Post created!');
+      toast.success('Post published!');
       setDialogOpen(false);
       reset();
-      load(0);
+      setSelectedCategory('GENERAL');
+      load(0, categoryFilter, sortMode);
     } catch (err: any) {
       toast.error(err?.response?.data?.message ?? 'Failed to create post');
     } finally {
@@ -91,20 +99,51 @@ export default function PostsPage() {
       <div className="max-w-3xl space-y-4">
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-bold">Community Board</h1>
+          {/* Sort toggle — Feature 9: rankings by votes */}
+          <div className="flex gap-1 border rounded-md p-1">
+            <Button
+                size="sm" variant={sortMode === 'date' ? 'secondary' : 'ghost'}
+                className="h-7 gap-1 text-xs"
+                onClick={() => setSortMode('date')}
+            >
+              <Clock className="h-3.5 w-3.5" /> Latest
+            </Button>
+            <Button
+                size="sm" variant={sortMode === 'votes' ? 'secondary' : 'ghost'}
+                className="h-7 gap-1 text-xs"
+                onClick={() => setSortMode('votes')}
+            >
+              <TrendingUp className="h-3.5 w-3.5" /> Top Rated
+            </Button>
+          </div>
         </div>
 
+        {/* Category filters */}
         <div className="flex gap-2 flex-wrap">
-          {(['ALL', ...CATEGORIES.map((c) => c.value)] as const).map((cat) => (
+          <Button
+              variant={categoryFilter === 'ALL' ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setCategoryFilter('ALL')}
+          >
+            All
+          </Button>
+          {CATEGORIES.map((cat) => (
               <Button
-                  key={cat}
-                  variant={categoryFilter === cat ? 'default' : 'outline'}
+                  key={cat.value}
+                  variant={categoryFilter === cat.value ? 'default' : 'outline'}
                   size="sm"
-                  onClick={() => setCategoryFilter(cat)}
+                  onClick={() => setCategoryFilter(cat.value as CategoryValue)}
               >
-                {cat === 'ALL' ? 'All' : CATEGORIES.find((c) => c.value === cat)?.label ?? cat}
+                {cat.label}
               </Button>
           ))}
         </div>
+
+        {sortMode === 'votes' && (
+            <p className="text-xs text-muted-foreground italic">
+              📊 Showing posts ranked by community votes
+            </p>
+        )}
 
         {loading ? (
             <div className="space-y-3">
@@ -118,8 +157,15 @@ export default function PostsPage() {
             </div>
         ) : (
             <div className="space-y-3">
-              {posts.map((post) => (
-                  <PostCard key={post.id} post={post} onVote={handleVote} />
+              {posts.map((post, idx) => (
+                  <div key={post.id} className="relative">
+                    {sortMode === 'votes' && idx < 3 && (
+                        <span className="absolute -left-5 top-3 text-sm font-bold text-muted-foreground select-none">
+                  #{idx + 1}
+                </span>
+                    )}
+                    <PostCard post={post} onVote={handleVote} />
+                  </div>
               ))}
             </div>
         )}
@@ -132,32 +178,35 @@ export default function PostsPage() {
             </div>
         )}
 
+        {/* Floating create button */}
         <Button
             className="fixed bottom-6 right-6 h-12 w-12 rounded-full shadow-lg p-0"
             onClick={() => setDialogOpen(true)}
+            title="Create Post"
         >
           <Plus className="h-5 w-5" />
         </Button>
 
+        {/* Create post dialog */}
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           <DialogContent>
             <DialogHeader><DialogTitle>Create Post</DialogTitle></DialogHeader>
             <form onSubmit={handleSubmit(onCreatePost)} className="space-y-3">
               <div className="space-y-1">
-                <Label>Title</Label>
+                <Label>Title *</Label>
                 <Input {...register('title')} placeholder="Post title..." />
                 {errors.title && <p className="text-xs text-destructive">{errors.title.message}</p>}
               </div>
               <div className="space-y-1">
-                <Label>Description</Label>
+                <Label>Description *</Label>
                 <Textarea {...register('description')} placeholder="Describe your post..." rows={4} />
                 {errors.description && <p className="text-xs text-destructive">{errors.description.message}</p>}
               </div>
               <div className="space-y-1">
-                <Label>Category</Label>
+                <Label>Category *</Label>
                 <Select
                     value={selectedCategory}
-                    onValueChange={(val: PostCategory) => {
+                    onValueChange={(val: CategoryValue) => {
                       setSelectedCategory(val);
                       setValue('category', val);
                     }}
@@ -169,6 +218,7 @@ export default function PostsPage() {
                     ))}
                   </SelectContent>
                 </Select>
+                {errors.category && <p className="text-xs text-destructive">{errors.category.message}</p>}
               </div>
               <DialogFooter>
                 <Button type="submit" disabled={creating}>

@@ -1,8 +1,6 @@
 package com.fypals.FYPals.content.service;
 
 import com.fypals.FYPals.notification.service.NotificationService;
-import com.fypals.FYPals.notification.entity.Notification;
-import com.fypals.FYPals.notification.repository.NotificationRepository;
 import com.fypals.FYPals.content.entity.Post;
 import com.fypals.FYPals.content.entity.Comment;
 import com.fypals.FYPals.content.entity.Vote;
@@ -11,6 +9,8 @@ import com.fypals.FYPals.content.repository.CommentRepository;
 import com.fypals.FYPals.content.repository.VoteRepository;
 import com.fypals.FYPals.enums.PostCategory;
 import com.fypals.FYPals.enums.VoteType;
+import com.fypals.FYPals.user.entity.User;
+import com.fypals.FYPals.user.repository.UserRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -19,25 +19,26 @@ import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
+import java.util.Optional;
 
 @Service
 public class ContentService {
 
-    @Autowired
-    private PostRepository postRepository;
-
-    @Autowired
-    private CommentRepository commentRepository;
-
-    @Autowired
-    private VoteRepository voteRepository;
-
-    @Autowired
-    private NotificationService notificationService;
+    @Autowired private PostRepository       postRepository;
+    @Autowired private CommentRepository    commentRepository;
+    @Autowired private VoteRepository       voteRepository;
+    @Autowired private NotificationService  notificationService;
+    @Autowired private UserRepository       userRepository;
 
     @Transactional
     public Post createPost(Long authorId, String title, String description, PostCategory category) {
-        Post post = new Post(authorId, title, description, category);
+        if (title == null || title.trim().isEmpty()) {
+            throw new IllegalArgumentException("Title cannot be empty");
+        }
+        if (description == null || description.trim().isEmpty()) {
+            throw new IllegalArgumentException("Description cannot be empty");
+        }
+        Post post = new Post(authorId, title.trim(), description.trim(), category);
         return postRepository.save(post);
     }
 
@@ -63,18 +64,27 @@ public class ContentService {
 
     @Transactional
     public Comment addComment(Long postId, Long authorId, String content) {
+        if (content == null || content.trim().isEmpty()) {
+            throw new IllegalArgumentException("Comment cannot be empty");
+        }
         Post post = getPost(postId);
 
-        Comment comment = new Comment(postId, authorId, content);
+        // Get commenter's name for the notification message
+        String commenterName = userRepository.findById(authorId)
+                .map(User::getName)
+                .orElse("Someone");
+
+        Comment comment = new Comment(postId, authorId, content.trim());
         Comment savedComment = commentRepository.save(comment);
 
         post.setCommentCount((int) commentRepository.countByPostId(postId));
         postRepository.save(post);
 
+        // Notify post author (but not if they're commenting on their own post)
         if (!post.getAuthorId().equals(authorId)) {
             notificationService.sendNotification(
                     post.getAuthorId(),
-                    "Someone commented on your post: " + post.getTitle(),
+                    commenterName + " commented on your post: \"" + post.getTitle() + "\"",
                     "COMMENT",
                     postId
             );
@@ -90,25 +100,21 @@ public class ContentService {
     @Transactional
     public Post voteOnPost(Long postId, Long userId, VoteType voteType) {
         Post post = getPost(postId);
-        java.util.Optional<Vote> existingVote = voteRepository.findByPostIdAndUserId(postId, userId);
+        Optional<Vote> existingVote = voteRepository.findByPostIdAndUserId(postId, userId);
 
         if (existingVote.isPresent()) {
             Vote vote = existingVote.get();
             if (vote.getVoteType() == voteType) {
-                // Same vote type — remove vote (toggle off)
                 voteRepository.delete(vote);
             } else {
-                // Different vote type — switch vote
                 vote.setVoteType(voteType);
                 voteRepository.save(vote);
             }
         } else {
-            // No existing vote — add new vote
             voteRepository.save(new Vote(postId, userId, voteType));
         }
 
-        // Recalculate voteCount from actual votes
-        int upvotes = voteRepository.countByPostIdAndVoteType(postId, VoteType.UPVOTE);
+        int upvotes   = voteRepository.countByPostIdAndVoteType(postId, VoteType.UPVOTE);
         int downvotes = voteRepository.countByPostIdAndVoteType(postId, VoteType.DOWNVOTE);
         post.setVoteCount(upvotes - downvotes);
         return postRepository.save(post);
@@ -121,71 +127,50 @@ public class ContentService {
     public int getDownvoteCount(Long postId) {
         return voteRepository.countByPostIdAndVoteType(postId, VoteType.DOWNVOTE);
     }
-    // Update a post
+
     @Transactional
     public Post updatePost(Long postId, Long authorId, String title, String description, PostCategory category) {
         Post post = getPost(postId);
-
         if (!post.getAuthorId().equals(authorId)) {
             throw new RuntimeException("Only the author can update this post");
         }
-
         post.setTitle(title);
         post.setDescription(description);
         post.setCategory(category);
         return postRepository.save(post);
     }
 
-    // Delete a post (and all its comments and votes)
     @Transactional
     public void deletePost(Long postId, Long authorId) {
         Post post = getPost(postId);
-
         if (!post.getAuthorId().equals(authorId)) {
             throw new RuntimeException("Only the author can delete this post");
         }
-
-        // Delete all votes on this post
         voteRepository.deleteByPostId(postId);
-
-        // Delete all comments on this post
-        List<Comment> comments = commentRepository.findByPostIdOrderByCreatedAtAsc(postId);
-        commentRepository.deleteAll(comments);
-
-        // Delete the post
+        commentRepository.deleteByPostId(postId);
         postRepository.delete(post);
     }
 
-    // Update a comment
     @Transactional
     public Comment updateComment(Long commentId, Long authorId, String content) {
         Comment comment = commentRepository.findById(commentId)
                 .orElseThrow(() -> new RuntimeException("Comment not found"));
-
         if (!comment.getAuthorId().equals(authorId)) {
             throw new RuntimeException("Only the author can update this comment");
         }
-
         comment.setContent(content);
-        Comment updatedComment = commentRepository.save(comment);
-
-        return updatedComment;
+        return commentRepository.save(comment);
     }
 
-    // Delete a comment
     @Transactional
     public void deleteComment(Long commentId, Long authorId) {
         Comment comment = commentRepository.findById(commentId)
                 .orElseThrow(() -> new RuntimeException("Comment not found"));
-
         if (!comment.getAuthorId().equals(authorId)) {
             throw new RuntimeException("Only the author can delete this comment");
         }
-
         Long postId = comment.getPostId();
         commentRepository.delete(comment);
-
-        // Update comment count on the post
         Post post = postRepository.findById(postId)
                 .orElseThrow(() -> new RuntimeException("Post not found"));
         post.setCommentCount((int) commentRepository.countByPostId(postId));

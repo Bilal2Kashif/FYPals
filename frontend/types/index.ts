@@ -76,7 +76,12 @@ export interface Team {
 
 // ─── Post ────────────────────────────────────────────────────────────────────
 
-export type PostCategory = 'LOOKING_FOR_MEMBER' | 'PROJECT_IDEA' | 'GENERAL';
+export type PostCategory =
+    | 'LOOKING_FOR_MEMBER'
+    | 'LOOKING_FOR_ADVISOR'
+    | 'PROJECT_IDEA'
+    | 'REQUIREMENT'
+    | 'GENERAL';
 
 export interface Post {
   id: number;
@@ -101,14 +106,14 @@ export interface Comment {
 
 // ─── Progress ─────────────────────────────────────────────────────────────────
 
-export type CheckpointStatus = 'PENDING' | 'IN_PROGRESS' | 'IN_REVIEW' | 'COMPLETE';
+export type CheckpointStatus = 'TODO' | 'IN_PROGRESS' | 'IN_REVIEW' | 'COMPLETE';
 
 export interface Checkpoint {
   id: number;
   phaseId: number;
   title: string;
   status: CheckpointStatus;
-  assignedTo?: number;
+  assignedToId?: number;
   assignedToName?: string;
   deadline?: string;
   createdAt?: string;
@@ -138,20 +143,22 @@ export type ProjectStatus = 'ACTIVE' | 'COMPLETED' | 'ON_HOLD';
 export interface Project {
   id: number;
   teamId: number;
+  projectName?: string;
   description?: string;
   status: ProjectStatus;
   supervisorId?: number;
   startDate?: string;
   endDate?: string;
+  completionPercentage?: number;
 }
 
 // ─── Deliverable ─────────────────────────────────────────────────────────────
 
 export type DeliverableStatus =
-  | 'PENDING'
-  | 'SUBMITTED'
-  | 'APPROVED'
-  | 'CHANGES_REQUESTED';
+    | 'PENDING'
+    | 'SUBMITTED'
+    | 'APPROVED'
+    | 'CHANGES_REQUESTED';
 
 export type FeedbackDecision = 'APPROVED' | 'CHANGES_REQUESTED';
 
@@ -218,17 +225,21 @@ export interface Dispute {
 // ─── Notification ─────────────────────────────────────────────────────────────
 
 export type NotificationType =
-  | 'TEAM_INVITE'
-  | 'INVITE_ACCEPTED'
-  | 'INVITE_DECLINED'
-  | 'MEMBER_DROPPED'
-  | 'DISPUTE_RAISED'
-  | 'DISPUTE_ACCEPTED'
-  | 'DISPUTE_REJECTED'
-  | 'DELIVERABLE_SUBMITTED'
-  | 'DELIVERABLE_FEEDBACK'
-  | 'COMMENT'
-  | 'GENERAL';
+    | 'TEAM_INVITE'
+    | 'ADVISOR_INVITE'        // ← ADDED: advisor supervision invite
+    | 'INVITE_ACCEPTED'
+    | 'INVITE_DECLINED'
+    | 'MEMBER_DROPPED'
+    | 'TEAM_DROPPED'
+    | 'DISPUTE_RAISED'
+    | 'DISPUTE_ACCEPTED'
+    | 'DISPUTE_REJECTED'
+    | 'DISPUTE_RESOLVED'
+    | 'DELIVERABLE_SUBMITTED'
+    | 'DELIVERABLE_FEEDBACK'
+    | 'DEADLINE_REMINDER'
+    | 'COMMENT'
+    | 'GENERAL';
 
 export interface Notification {
   id: number;
@@ -254,12 +265,14 @@ export interface ChatMessage {
 
 // ─── Search ───────────────────────────────────────────────────────────────────
 
-export type SearchResultType = 'post' | 'student' | 'project';
+export type SearchResultType = 'post' | 'student' | 'advisor' | 'project';
 
 export interface SearchResult {
+  id: number;
   type: SearchResultType;
-  post?: Post;
-  user?: User;
+  title: string;
+  description?: string;
+  extra?: string;
 }
 
 // ─── Pagination ───────────────────────────────────────────────────────────────

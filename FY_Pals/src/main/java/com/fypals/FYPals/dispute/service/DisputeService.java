@@ -21,11 +21,11 @@ import java.util.stream.Collectors;
 @Service
 public class DisputeService {
 
-    @Autowired private DisputeRepository disputeRepository;
-    @Autowired private PollRepository pollRepository;
+    @Autowired private DisputeRepository  disputeRepository;
+    @Autowired private PollRepository     pollRepository;
     @Autowired private PollVoteRepository pollVoteRepository;
     @Autowired private NotificationService notificationService;
-    @Autowired private UserRepository userRepository;
+    @Autowired private UserRepository     userRepository;
 
     private Dispute enrich(Dispute d) {
         userRepository.findById(d.getRaisedBy())
@@ -37,7 +37,6 @@ public class DisputeService {
         return d;
     }
 
-    // Auto-compute winning option from poll votes
     private String computeWinningOption(Long disputeId) {
         try {
             List<Poll> polls = pollRepository.findAllByDisputeId(disputeId);
@@ -55,7 +54,7 @@ public class DisputeService {
                     .map(Map.Entry::getKey)
                     .collect(Collectors.toList());
 
-            if (topOptions.size() > 1) return "Tie — no decision";
+            if (topOptions.size() > 1) return "Tie — no single decision";
             return topOptions.get(0);
         } catch (Exception e) {
             return null;
@@ -66,6 +65,9 @@ public class DisputeService {
     public Dispute raiseDispute(Long teamId, Long raisedBy, String targetItem, String reason) {
         if (reason == null || reason.trim().isEmpty()) {
             throw new RuntimeException("Reason cannot be empty");
+        }
+        if (targetItem == null || targetItem.trim().isEmpty()) {
+            throw new RuntimeException("Target item cannot be empty");
         }
         return enrich(disputeRepository.save(new Dispute(teamId, raisedBy, targetItem, reason)));
     }
@@ -125,7 +127,19 @@ public class DisputeService {
     }
 
     @Transactional
-    public Poll acceptDisputeAndCreatePoll(Long disputeId, Long leaderId, String question, String options, LocalDateTime deadline) {
+    public Poll acceptDisputeAndCreatePoll(Long disputeId, Long leaderId, String question,
+                                           String options, LocalDateTime deadline) {
+        // FIX 9: Validate poll deadline is not in the past
+        if (deadline != null && deadline.isBefore(LocalDateTime.now())) {
+            throw new IllegalArgumentException("Poll voting deadline cannot be in the past");
+        }
+        if (question == null || question.trim().isEmpty()) {
+            throw new IllegalArgumentException("Poll question is required");
+        }
+        if (options == null || options.trim().isEmpty()) {
+            throw new IllegalArgumentException("Poll options are required");
+        }
+
         Dispute dispute = disputeRepository.findById(disputeId)
                 .orElseThrow(() -> new RuntimeException("Dispute not found"));
         dispute.setStatus(DisputeStatus.OPEN);

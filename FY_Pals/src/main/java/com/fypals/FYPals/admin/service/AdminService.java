@@ -4,9 +4,16 @@ import com.fypals.FYPals.admin.dto.AdminPostDTO;
 import com.fypals.FYPals.admin.dto.AdminTeamDTO;
 import com.fypals.FYPals.admin.dto.AdminUserDTO;
 import com.fypals.FYPals.content.entity.Post;
+import com.fypals.FYPals.content.repository.CommentRepository;
 import com.fypals.FYPals.content.repository.PostRepository;
+import com.fypals.FYPals.content.repository.VoteRepository;
+import com.fypals.FYPals.deliverable.repository.DeliverableRepository;
+import com.fypals.FYPals.dispute.repository.DisputeRepository;
 import com.fypals.FYPals.enums.Role;
+import com.fypals.FYPals.notification.repository.NotificationRepository;
+import com.fypals.FYPals.progress.repository.ProjectRepository;
 import com.fypals.FYPals.team.entity.Team;
+import com.fypals.FYPals.team.entity.TeamMember;
 import com.fypals.FYPals.team.repository.TeamMemberRepository;
 import com.fypals.FYPals.team.repository.TeamRepository;
 import com.fypals.FYPals.user.entity.*;
@@ -19,6 +26,8 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.List;
+
 @Service
 @RequiredArgsConstructor
 public class AdminService {
@@ -27,6 +36,12 @@ public class AdminService {
     private final TeamRepository       teamRepository;
     private final TeamMemberRepository teamMemberRepository;
     private final PostRepository       postRepository;
+    private final CommentRepository    commentRepository;
+    private final VoteRepository       voteRepository;
+    private final NotificationRepository notificationRepository;
+    private final ProjectRepository    projectRepository;
+    private final DeliverableRepository deliverableRepository;
+    private final DisputeRepository    disputeRepository;
     private final PasswordEncoder      passwordEncoder;
 
     // ── Read ──────────────────────────────────────────────────────────────────
@@ -59,8 +74,6 @@ public class AdminService {
         Role role = Role.valueOf(roleStr);
         String hashed = passwordEncoder.encode(password);
 
-        // Instantiate the correct subclass, then set common fields via User setters
-        // (setRole, setName, setEmail, setPassword are all on User via @Getter/@Setter)
         User user = switch (role) {
             case STUDENT   -> new Student();
             case ADVISOR   -> new Advisor();
@@ -72,6 +85,10 @@ public class AdminService {
         user.setName(name);
         user.setEmail(email);
         user.setPassword(hashed);
+
+        // Admins are always profile-complete; others must fill their profiles
+        user.setProfileComplete(role == Role.ADMIN);
+
         userRepository.save(user);
     }
 
@@ -79,20 +96,69 @@ public class AdminService {
 
     @Transactional
     public void updateUserRole(Long id, String roleStr) {
-        User user = userRepository.findById(id)
+        User oldUser = userRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("User not found: " + id));
-        user.setRole(Role.valueOf(roleStr));
-        userRepository.save(user);
+
+        Role newRole = Role.valueOf(roleStr);
+        if (oldUser.getRole() == newRole) return;
+
+        userRepository.updateDtype(id, newRole.name());
+        oldUser.setRole(newRole);
+        // If changing TO admin, mark profile complete automatically
+        if (newRole == Role.ADMIN) {
+            oldUser.setProfileComplete(true);
+        }
+        userRepository.save(oldUser);
     }
 
     // ── Delete user ───────────────────────────────────────────────────────────
 
     @Transactional
-    public void deleteUser(Long id) {
+    public void deleteUser(Long id, Long requestingAdminId) {
+        if (id.equals(requestingAdminId)) {
+            throw new RuntimeException("You cannot delete your own account");
+        }
         if (!userRepository.existsById(id)) {
             throw new EntityNotFoundException("User not found: " + id);
         }
+
+        List<Team> ledTeams = teamRepository.findByLeaderId(id);
+        for (Team team : ledTeams) {
+            deleteTeamInternal(team.getId());
+        }
+
+        List<TeamMember> memberships = teamMemberRepository.findByUserId(id);
+        teamMemberRepository.deleteAll(memberships);
+
+        List<Post> userPosts = postRepository.findByAuthorId(id);
+        for (Post post : userPosts) {
+            voteRepository.deleteByPostId(post.getId());
+            commentRepository.deleteByPostId(post.getId());
+        }
+        postRepository.deleteAll(userPosts);
+
+        notificationRepository.deleteByUserId(id);
         userRepository.deleteById(id);
+    }
+
+    // ── Delete team ───────────────────────────────────────────────────────────
+
+    @Transactional
+    public void deleteTeam(Long teamId) {
+        if (!teamRepository.existsById(teamId)) {
+            throw new EntityNotFoundException("Team not found: " + teamId);
+        }
+        deleteTeamInternal(teamId);
+    }
+
+    private void deleteTeamInternal(Long teamId) {
+        disputeRepository.deleteByTeamId(teamId);
+        projectRepository.findByTeamId(teamId).ifPresent(project -> {
+            deliverableRepository.deleteByProjectId(project.getId());
+            projectRepository.delete(project);
+        });
+        teamMemberRepository.deleteByTeamId(teamId);
+        teamRepository.deleteById(teamId);
     }
 
     // ── Mappers ───────────────────────────────────────────────────────────────
@@ -124,12 +190,17 @@ public class AdminService {
     }
 
     private AdminPostDTO toAdminPostDTO(Post post) {
+        // Look up the author name from userId — the Post entity only stores authorId
+        String authorName = userRepository.findById(post.getAuthorId())
+                .map(u -> u.getName())
+                .orElse("Unknown");
         return AdminPostDTO.builder()
                 .id(post.getId())
                 .title(post.getTitle())
                 .description(post.getDescription())
                 .category(post.getCategory())
                 .authorId(post.getAuthorId())
+                .authorName(authorName)
                 .voteCount(post.getVoteCount())
                 .commentCount(post.getCommentCount())
                 .createdAt(post.getCreatedAt())

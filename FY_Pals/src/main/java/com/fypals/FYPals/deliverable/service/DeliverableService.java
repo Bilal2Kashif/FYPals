@@ -10,6 +10,7 @@ import com.fypals.FYPals.progress.repository.ProjectRepository;
 import com.fypals.FYPals.team.repository.TeamMemberRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 
@@ -17,68 +18,139 @@ import java.time.LocalDateTime;
 @RequiredArgsConstructor
 public class DeliverableService {
 
-    private final DeliverableRepository deliverableRepository;
-    private final FeedbackRepository feedbackRepository;
-    private final ProjectRepository projectRepository;
-    private final NotificationService notificationService;
-    private final TeamMemberRepository teamMemberRepository;
+    private final DeliverableRepository  deliverableRepository;
+    private final FeedbackRepository     feedbackRepository;
+    private final ProjectRepository      projectRepository;
+    private final NotificationService    notificationService;
+    private final TeamMemberRepository   teamMemberRepository;
 
     public Deliverable createDeliverable(Long projectId, String title, String deadline) {
+        if (title == null || title.trim().isEmpty()) {
+            throw new IllegalArgumentException("Deliverable title cannot be empty");
+        }
+        if (deadline == null || deadline.trim().isEmpty()) {
+            throw new IllegalArgumentException("Deadline is required");
+        }
+
         Project project = projectRepository.findById(projectId)
                 .orElseThrow(() -> new RuntimeException("Project not found: " + projectId));
+
+        LocalDate deadlineDate = LocalDate.parse(deadline);
+        if (deadlineDate.isBefore(LocalDate.now())) {
+            throw new IllegalArgumentException("Deadline cannot be in the past");
+        }
+
         Deliverable d = new Deliverable();
         d.setProject(project);
-        d.setTitle(title);
-        d.setDeadline(LocalDate.parse(deadline));
+        d.setTitle(title.trim());
+        d.setDeadline(deadlineDate);
         d.setStatus("PENDING");
         return deliverableRepository.save(d);
     }
 
-    public Deliverable submit(Long deliverableId, String driveLink) {
+    /**
+     * Submit or RESUBMIT a deliverable.
+     *
+     * Feature 12: FYP deliverable submission/resubmission.
+     *
+     * Allows submission when status is:
+     * - PENDING (first submission)
+     * - CHANGES_REQUESTED (resubmission after advisor requested changes)
+     *
+     * Deadline check: only blocks if deadline is strictly before today
+     * (i.e. the deadline day itself is still valid for submission).
+     */
+    public Deliverable submit(Long deliverableId, String driveLink, String resubmissionComment) {
+        if (driveLink == null || driveLink.trim().isEmpty()) {
+            throw new IllegalArgumentException("Google Drive link cannot be empty");
+        }
+
         Deliverable d = deliverableRepository.findById(deliverableId)
                 .orElseThrow(() -> new RuntimeException("Deliverable not found: " + deliverableId));
-        if (LocalDate.now().isAfter(d.getDeadline())) {
-            throw new RuntimeException("Submission deadline has passed");
+
+        // Only PENDING and CHANGES_REQUESTED allow (re)submission
+        if (!"PENDING".equals(d.getStatus()) && !"CHANGES_REQUESTED".equals(d.getStatus())) {
+            throw new RuntimeException("This deliverable cannot be submitted. Current status: " + d.getStatus());
         }
-        d.setGoogleDriveLink(driveLink);
+
+        // Deadline check: block only if deadline was yesterday or earlier
+        if (d.getDeadline() != null && LocalDate.now().isAfter(d.getDeadline())) {
+            throw new RuntimeException("Submission deadline has passed. Deadline was: " + d.getDeadline());
+        }
+
+        d.setGoogleDriveLink(driveLink.trim());
         d.setStatus("SUBMITTED");
         d.setSubmittedAt(LocalDateTime.now());
-        return deliverableRepository.save(d);
+        if (resubmissionComment != null && !resubmissionComment.isBlank()) {
+            d.setResubmissionComment(resubmissionComment.trim());
+        } else {
+            d.setResubmissionComment(null);
+        }
+        Deliverable saved = deliverableRepository.save(d);
+
+        // Notify advisor of resubmission
+        if (d.getProject() != null && d.getProject().getSupervisorId() != null) {
+            String msg = "Team submitted deliverable: '" + d.getTitle() + "'";
+            notificationService.sendNotification(
+                    d.getProject().getSupervisorId(),
+                    msg,
+                    "DELIVERABLE_SUBMITTED",
+                    deliverableId
+            );
+        }
+
+        return saved;
     }
 
+    /**
+     * Give feedback on a deliverable.
+     * ADVISOR: must provide a decision (APPROVED or CHANGES_REQUESTED). If CHANGES_REQUESTED,
+     *          deliverable status resets so team can resubmit.
+     * FYP_STAFF: leaves a comment only, no decision, no status change.
+     */
     public Feedback giveFeedback(Long deliverableId, String comment,
                                  String decision, String callerRole) {
+        if (comment == null || comment.trim().isEmpty()) {
+            throw new IllegalArgumentException("Feedback comment cannot be empty");
+        }
+
         Deliverable d = deliverableRepository.findById(deliverableId)
                 .orElseThrow(() -> new RuntimeException("Deliverable not found"));
+
         Feedback fb = new Feedback();
         fb.setDeliverable(d);
-        fb.setComment(comment);
+        fb.setComment(comment.trim());
 
         if ("ADVISOR".equals(callerRole)) {
             if (decision == null || decision.isBlank()) {
                 throw new RuntimeException("Advisor must provide a decision: APPROVED or CHANGES_REQUESTED");
             }
+            if (!decision.equals("APPROVED") && !decision.equals("CHANGES_REQUESTED")) {
+                throw new IllegalArgumentException("Decision must be APPROVED or CHANGES_REQUESTED");
+            }
             fb.setDecision(decision);
             d.setStatus(decision);
             deliverableRepository.save(d);
         }
+        // FYP_STAFF: no decision, no status change
 
         Feedback saved = feedbackRepository.save(fb);
 
-        // Notify all team members about the feedback
+        // Notify all team members about feedback
         if (d.getProject() != null && d.getProject().getTeam() != null) {
             Long teamId = d.getProject().getTeam().getId();
-            String msg = decision != null
+            String msg = "ADVISOR".equals(callerRole)
                     ? "Your deliverable '" + d.getTitle() + "' received feedback: " + decision
-                    : "Your deliverable '" + d.getTitle() + "' received a staff comment";
-            teamMemberRepository.findByTeamId(teamId).forEach(member -> {
-                notificationService.sendNotification(
-                        member.getUser().getId(),
-                        msg,
-                        "DELIVERABLE_FEEDBACK",
-                        deliverableId
-                );
-            });
+                    : "FYP Staff left a comment on deliverable '" + d.getTitle() + "'";
+
+            teamMemberRepository.findByTeamId(teamId).forEach(member ->
+                    notificationService.sendNotification(
+                            member.getUser().getId(),
+                            msg,
+                            "DELIVERABLE_FEEDBACK",
+                            deliverableId
+                    )
+            );
         }
 
         return saved;

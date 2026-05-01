@@ -1,12 +1,13 @@
 package com.fypals.FYPals.team.service;
 
-import com.fypals.FYPals.progress.entity.Project;
-import com.fypals.FYPals.progress.repository.ProjectRepository;
 import com.fypals.FYPals.enums.MemberRole;
+import com.fypals.FYPals.enums.Role;
 import com.fypals.FYPals.enums.TeamStatus;
 import com.fypals.FYPals.notification.entity.Notification;
 import com.fypals.FYPals.notification.repository.NotificationRepository;
 import com.fypals.FYPals.notification.service.NotificationService;
+import com.fypals.FYPals.progress.entity.Project;
+import com.fypals.FYPals.progress.repository.ProjectRepository;
 import com.fypals.FYPals.team.entity.Team;
 import com.fypals.FYPals.team.entity.TeamMember;
 import com.fypals.FYPals.team.repository.TeamMemberRepository;
@@ -17,18 +18,21 @@ import jakarta.persistence.EntityNotFoundException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import java.util.Map;
+
 import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
 public class TeamService {
 
-    private final ProjectRepository projectRepository;
-    private final TeamRepository teamRepository;
+    private final ProjectRepository    projectRepository;
+    private final TeamRepository       teamRepository;
     private final TeamMemberRepository teamMemberRepository;
-    private final UserRepository userRepository;
-    private final NotificationService notificationService;
+    private final UserRepository       userRepository;
+    private final NotificationService  notificationService;
 
     @Transactional
     public Team formTeam(Long userId, String teamName) {
@@ -41,8 +45,12 @@ public class TeamService {
             throw new RuntimeException("User is already in a team");
         }
 
+        if (teamName == null || teamName.trim().isEmpty()) {
+            throw new IllegalArgumentException("Team name cannot be empty");
+        }
+
         Team team = Team.builder()
-                .teamName(teamName)
+                .teamName(teamName.trim())
                 .leader(user)
                 .status(TeamStatus.FORMING)
                 .build();
@@ -66,6 +74,11 @@ public class TeamService {
         return team;
     }
 
+    /**
+     * Invite a student to join the team.
+     * FIX: Only sends notification to the target student, NOT to the leader (who is sending it).
+     * FIX: Validates the target user is actually a STUDENT role.
+     */
     @Transactional
     public Notification inviteStudent(Long leaderId, Long teamId, Long targetUserId) {
         Team team = teamRepository.findById(teamId)
@@ -75,20 +88,69 @@ public class TeamService {
             throw new RuntimeException("Only team leader can send invites");
         }
 
+        // Prevent leader from inviting themselves
+        if (leaderId.equals(targetUserId)) {
+            throw new RuntimeException("You cannot invite yourself");
+        }
+
+        User targetUser = userRepository.findById(targetUserId)
+                .orElseThrow(() -> new EntityNotFoundException("User not found"));
+
+        // Only students can be invited as team members
+        if (targetUser.getRole() != Role.STUDENT) {
+            throw new RuntimeException("Only students can be invited as team members");
+        }
+
         boolean alreadyInTeam = teamMemberRepository.findByUserId(targetUserId)
                 .stream().anyMatch(tm -> tm.getDropDate() == null);
         if (alreadyInTeam) {
-            throw new RuntimeException("User is already in a team");
+            throw new RuntimeException("This student is already in a team");
         }
 
+        // Send notification ONLY to the target student
         return notificationService.sendNotification(
                 targetUserId,
-                "You've been invited to join team: " + team.getTeamName(),
+                "You've been invited to join team: " + team.getTeamName() + " by " + team.getLeader().getName(),
                 "TEAM_INVITE",
                 teamId
         );
     }
 
+    /**
+     * Invite an advisor to supervise the team.
+     * NEW: Dedicated advisor invite that sends ADVISOR_INVITE notification.
+     */
+    @Transactional
+    public Notification inviteAdvisor(Long leaderId, Long teamId, Long advisorUserId) {
+        Team team = teamRepository.findById(teamId)
+                .orElseThrow(() -> new EntityNotFoundException("Team not found"));
+
+        if (!team.getLeader().getId().equals(leaderId)) {
+            throw new RuntimeException("Only team leader can invite an advisor");
+        }
+
+        User advisor = userRepository.findById(advisorUserId)
+                .orElseThrow(() -> new EntityNotFoundException("User not found"));
+
+        if (advisor.getRole() != Role.ADVISOR) {
+            throw new RuntimeException("The selected user is not an advisor");
+        }
+
+        // Check if team already has a supervisor
+        projectRepository.findByTeamId(teamId).ifPresent(p -> {
+            if (p.getSupervisorId() != null) {
+                throw new RuntimeException("This team already has a supervisor");
+            }
+        });
+
+        // Send notification to the advisor
+        return notificationService.sendNotification(
+                advisorUserId,
+                "Team '" + team.getTeamName() + "' has invited you to be their FYP supervisor",
+                "ADVISOR_INVITE",
+                teamId
+        );
+    }
 
     @Transactional
     public Map<String, Object> getTeam(Long teamId) {
@@ -103,8 +165,7 @@ public class TeamService {
         result.put("leaderName", team.getLeader().getName());
         result.put("memberCount", team.getMembers().size());
 
-        // Add members list
-        java.util.List<Map<String, Object>> members = team.getMembers().stream()
+        List<Map<String, Object>> members = team.getMembers().stream()
                 .map(m -> {
                     Map<String, Object> member = new HashMap<>();
                     member.put("id", m.getId());
@@ -112,11 +173,15 @@ public class TeamService {
                     member.put("userName", m.getUser().getName());
                     member.put("memberRole", m.getMemberRole());
                     return member;
-                }).collect(java.util.stream.Collectors.toList());
+                }).collect(Collectors.toList());
         result.put("members", members);
 
-        // Add project id if exists
-        projectRepository.findByTeamId(teamId).ifPresent(p -> result.put("project", Map.of("id", p.getId())));
+        projectRepository.findByTeamId(teamId).ifPresent(p -> {
+            Map<String, Object> projectMap = new HashMap<>();
+            projectMap.put("id", p.getId());
+            projectMap.put("supervisorId", p.getSupervisorId());
+            result.put("project", projectMap);
+        });
 
         return result;
     }
@@ -141,8 +206,31 @@ public class TeamService {
         notificationService.sendNotification(
                 memberId,
                 "You have been removed from team: " + team.getTeamName(),
-                "TEAM_DROPPED",   // ← correct
+                "TEAM_DROPPED",
                 teamId
         );
+    }
+
+    /**
+     * Check and update team status.
+     * Team becomes ACTIVE when it has: 1 leader + at least 1 other member + an advisor (supervisorId set).
+     * Called after a member accepts an invite.
+     */
+    @Transactional
+    public void checkAndUpdateTeamStatus(Long teamId) {
+        Team team = teamRepository.findById(teamId).orElse(null);
+        if (team == null || team.getStatus() != TeamStatus.FORMING) return;
+
+        int memberCount = teamMemberRepository.countByTeamId(teamId);
+        // Need at least 2 members (leader + 1 more)
+        if (memberCount < 2) return;
+
+        // Check if advisor assigned
+        projectRepository.findByTeamId(teamId).ifPresent(p -> {
+            if (p.getSupervisorId() != null) {
+                team.setStatus(TeamStatus.ACTIVE);
+                teamRepository.save(team);
+            }
+        });
     }
 }

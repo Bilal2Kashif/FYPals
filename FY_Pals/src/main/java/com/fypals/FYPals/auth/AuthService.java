@@ -25,7 +25,8 @@ public class AuthService {
         userRepository.save(user);
 
         String token = jwtUtil.generateToken(user.getEmail(), user.getRole().name());
-        return new AuthResponse(user.getId(), user.getName(), token, user.getEmail(), user.getRole().name());
+        return new AuthResponse(user.getId(), user.getName(), token,
+                user.getEmail(), user.getRole().name());
     }
 
     public AuthResponse login(LoginRequest request) {
@@ -37,7 +38,8 @@ public class AuthService {
         }
 
         String token = jwtUtil.generateToken(user.getEmail(), user.getRole().name());
-        return new AuthResponse(user.getId(), user.getName(), token, user.getEmail(), user.getRole().name());
+        return new AuthResponse(user.getId(), user.getName(), token,
+                user.getEmail(), user.getRole().name());
     }
 
     private User buildUserByRole(RegisterRequest req) {
@@ -50,6 +52,8 @@ public class AuthService {
                 s.setPassword(hashed);
                 s.setName(req.getName());
                 s.setRole(Role.STUDENT);
+                // Students must fill GPA/skills before profileComplete=true
+                s.setProfileComplete(false);
                 yield s;
             }
             case ADVISOR -> {
@@ -58,6 +62,8 @@ public class AuthService {
                 a.setPassword(hashed);
                 a.setName(req.getName());
                 a.setRole(Role.ADVISOR);
+                // Advisors should fill department/research areas
+                a.setProfileComplete(false);
                 yield a;
             }
             case FYP_STAFF -> {
@@ -66,6 +72,8 @@ public class AuthService {
                 f.setPassword(hashed);
                 f.setName(req.getName());
                 f.setRole(Role.FYP_STAFF);
+                // FYP Staff should fill designation — starts incomplete
+                f.setProfileComplete(false);
                 yield f;
             }
             case ADMIN -> {
@@ -74,6 +82,8 @@ public class AuthService {
                 ad.setPassword(hashed);
                 ad.setName(req.getName());
                 ad.setRole(Role.ADMIN);
+                // Admins manage the system — their profile is complete by default
+                ad.setProfileComplete(true);
                 yield ad;
             }
         };
@@ -86,7 +96,6 @@ public class AuthService {
      * gets a 401, so the old token will often already be expired.
      */
     public AuthResponse refreshToken(String oldToken) {
-        // Extract email even if the token is expired (signature still valid)
         String email = jwtUtil.extractEmailIgnoreExpiry(oldToken);
         if (email == null) {
             throw new RuntimeException("Invalid token — cannot refresh");
@@ -94,6 +103,7 @@ public class AuthService {
         User user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new RuntimeException("User not found"));
         String newToken = jwtUtil.generateToken(user.getEmail(), user.getRole().name());
-        return new AuthResponse(user.getId(), user.getName(), newToken, user.getEmail(), user.getRole().name());
+        return new AuthResponse(user.getId(), user.getName(), newToken,
+                user.getEmail(), user.getRole().name());
     }
 }

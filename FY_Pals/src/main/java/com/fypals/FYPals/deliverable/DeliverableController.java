@@ -58,7 +58,7 @@ public class DeliverableController {
     public ResponseEntity<Map<String, Object>> submit(
             @PathVariable Long id,
             @RequestBody Map<String, String> body) {
-        Deliverable d = deliverableService.submit(id, body.get("googleDriveLink"));
+        Deliverable d = deliverableService.submit(id, body.get("googleDriveLink"), body.get("resubmissionComment"));
         return ResponseEntity.ok(toMap(d));
     }
 
@@ -92,14 +92,16 @@ public class DeliverableController {
         m.put("reminderSent", d.isReminderSent());
         m.put("projectId", d.getProject() != null ? d.getProject().getId() : null);
         m.put("submittedById", d.getSubmittedBy() != null ? d.getSubmittedBy().getId() : null);
+        m.put("resubmissionComment", d.getResubmissionComment());
 
         // Return advisor feedback separately from staff comments
         List<Feedback> allFeedback = feedbackRepository.findByDeliverableId(d.getId());
 
         // Advisor feedback = has a decision (APPROVED / CHANGES_REQUESTED)
+        // Use the MOST RECENT one (latest feedback after resubmission)
         allFeedback.stream()
                 .filter(fb -> fb.getDecision() != null && !fb.getDecision().isBlank())
-                .findFirst()
+                .max(java.util.Comparator.comparing(fb -> fb.getCreatedAt()))
                 .ifPresent(fb -> {
                     Map<String, Object> fbMap = new HashMap<>();
                     fbMap.put("id", fb.getId());

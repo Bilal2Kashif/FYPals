@@ -17,17 +17,25 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class TeamController {
 
-    private final TeamService teamService;
+    private final TeamService    teamService;
     private final UserRepository userRepository;
+
+    private Long getUserId(UserDetails userDetails) {
+        return userRepository.findByEmail(userDetails.getUsername())
+                .orElseThrow(() -> new EntityNotFoundException("User not found")).getId();
+    }
 
     @PostMapping
     public ResponseEntity<?> formTeam(
             @AuthenticationPrincipal UserDetails userDetails,
             @RequestParam String teamName) {
-        Long userId = userRepository.findByEmail(userDetails.getUsername())
-                .orElseThrow(() -> new EntityNotFoundException("User not found")).getId();
+        Long userId = getUserId(userDetails);
         Team team = teamService.formTeam(userId, teamName);
-        return ResponseEntity.ok(Map.of("message", "Team created", "teamId", team.getId(), "teamName", team.getTeamName()));
+        return ResponseEntity.ok(Map.of(
+                "message",  "Team created",
+                "teamId",   team.getId(),
+                "teamName", team.getTeamName()
+        ));
     }
 
     @GetMapping("/{teamId}")
@@ -40,10 +48,20 @@ public class TeamController {
             @AuthenticationPrincipal UserDetails userDetails,
             @PathVariable Long teamId,
             @RequestParam Long targetUserId) {
-        Long leaderId = userRepository.findByEmail(userDetails.getUsername())
-                .orElseThrow(() -> new EntityNotFoundException("User not found")).getId();
+        Long leaderId = getUserId(userDetails);
         teamService.inviteStudent(leaderId, teamId, targetUserId);
         return ResponseEntity.ok(Map.of("message", "Invite sent successfully"));
+    }
+
+    /** NEW: Invite an advisor to supervise the team */
+    @PostMapping("/{teamId}/invite-advisor")
+    public ResponseEntity<?> inviteAdvisor(
+            @AuthenticationPrincipal UserDetails userDetails,
+            @PathVariable Long teamId,
+            @RequestParam Long advisorId) {
+        Long leaderId = getUserId(userDetails);
+        teamService.inviteAdvisor(leaderId, teamId, advisorId);
+        return ResponseEntity.ok(Map.of("message", "Advisor invite sent"));
     }
 
     @DeleteMapping("/{teamId}/members/{memberId}")
@@ -51,8 +69,7 @@ public class TeamController {
             @AuthenticationPrincipal UserDetails userDetails,
             @PathVariable Long teamId,
             @PathVariable Long memberId) {
-        Long leaderId = userRepository.findByEmail(userDetails.getUsername())
-                .orElseThrow(() -> new EntityNotFoundException("User not found")).getId();
+        Long leaderId = getUserId(userDetails);
         teamService.dropMember(leaderId, teamId, memberId);
         return ResponseEntity.ok(Map.of("message", "Member dropped successfully"));
     }

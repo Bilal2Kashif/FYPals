@@ -1,6 +1,5 @@
 package com.fypals.FYPals.progress.service;
 
-
 import com.fypals.FYPals.progress.entity.*;
 import com.fypals.FYPals.progress.repository.*;
 import lombok.RequiredArgsConstructor;
@@ -12,8 +11,8 @@ import java.util.List;
 @RequiredArgsConstructor
 public class ProgressService {
 
-    private final ProjectRepository projectRepository;
-    private final PhaseRepository phaseRepository;
+    private final ProjectRepository    projectRepository;
+    private final PhaseRepository      phaseRepository;
     private final CheckpointRepository checkpointRepository;
 
     @Transactional
@@ -21,6 +20,15 @@ public class ProgressService {
         Project project = projectRepository.findById(projectId)
                 .orElseThrow(() -> new RuntimeException("Project not found"));
 
+        // Validate start < end
+        if (phase.getStartDate() == null || phase.getEndDate() == null) {
+            throw new IllegalArgumentException("Start date and end date are required");
+        }
+        if (!phase.getStartDate().isBefore(phase.getEndDate())) {
+            throw new IllegalArgumentException("Phase start date must be before end date");
+        }
+
+        // Validate no overlapping dates with existing phases
         List<Phase> existing = phaseRepository.findByProjectId(projectId);
         for (Phase p : existing) {
             boolean overlaps = !phase.getEndDate().isBefore(p.getStartDate())
@@ -39,8 +47,21 @@ public class ProgressService {
         Checkpoint cp = checkpointRepository.findById(checkpointId)
                 .orElseThrow(() -> new RuntimeException("Checkpoint not found"));
 
+        // Only leader can mark COMPLETE
         if ("COMPLETE".equals(newStatus) && !"LEADER".equals(callerRole)) {
             throw new RuntimeException("Only the team leader can mark a checkpoint as complete");
+        }
+
+        // Once COMPLETE, only leader can change it back
+        if ("COMPLETE".equals(cp.getStatus()) && !"LEADER".equals(callerRole)) {
+            throw new RuntimeException("Only the team leader can change a completed checkpoint");
+        }
+
+        // Members can only set IN_PROGRESS or IN_REVIEW
+        if ("MEMBER".equals(callerRole)) {
+            if (!"IN_PROGRESS".equals(newStatus) && !"IN_REVIEW".equals(newStatus)) {
+                throw new RuntimeException("Team members can only set status to IN_PROGRESS or IN_REVIEW");
+            }
         }
 
         cp.setStatus(newStatus);
@@ -54,7 +75,7 @@ public class ProgressService {
         long total = 0, completed = 0;
         for (Phase p : phases) {
             List<Checkpoint> cps = checkpointRepository.findByPhaseId(p.getId());
-            total += cps.size();
+            total     += cps.size();
             completed += cps.stream().filter(c -> "COMPLETE".equals(c.getStatus())).count();
         }
         double pct = total == 0 ? 0 : (completed * 100.0 / total);

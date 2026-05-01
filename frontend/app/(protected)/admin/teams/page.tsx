@@ -9,14 +9,13 @@ import { Skeleton } from '@/components/ui/skeleton';
 import api from '@/lib/api';
 import type { Page } from '@/types';
 
-// Use a local type matching AdminTeamDTO exactly
 interface AdminTeam {
   id: number;
   teamName: string;
   leaderName: string;
   leaderId: number;
   status: string;
-  memberCount: number;   // ← comes from AdminTeamDTO, not a members array
+  memberCount: number;
   createdAt: string;
 }
 
@@ -50,8 +49,8 @@ export default function AdminTeamsPage() {
 
   useEffect(() => { load(page); }, [page]);
 
-  const deleteTeam = async (id: number) => {
-    if (!confirm('Delete this team? This cannot be undone.')) return;
+  const deleteTeam = async (id: number, teamName: string) => {
+    if (!confirm(`Delete team "${teamName}"? This will also delete all associated data. This cannot be undone.`)) return;
     try {
       await api.delete(`/admin/teams/${id}`);
       toast.success('Team deleted');
@@ -94,9 +93,7 @@ export default function AdminTeamsPage() {
                 ))
             ) : teams.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="p-8 text-center text-muted-foreground">
-                    No teams found.
-                  </td>
+                  <td colSpan={6} className="p-8 text-center text-muted-foreground">No teams found.</td>
                 </tr>
             ) : (
                 teams.map((t) => (
@@ -106,7 +103,6 @@ export default function AdminTeamsPage() {
                       <td className="p-3">
                         <Badge variant="secondary">{t.status}</Badge>
                       </td>
-                      {/* Use memberCount from AdminTeamDTO — NOT t.members.length */}
                       <td className="p-3 text-muted-foreground">{t.memberCount}</td>
                       <td className="p-3 text-muted-foreground">{formatDate(t.createdAt)}</td>
                       <td className="p-3">
@@ -115,7 +111,7 @@ export default function AdminTeamsPage() {
                             variant="ghost"
                             className="h-7 w-7 text-destructive hover:text-destructive"
                             title="Delete team"
-                            onClick={() => deleteTeam(t.id)}
+                            onClick={() => deleteTeam(t.id, t.teamName)}
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </Button>
@@ -129,21 +125,11 @@ export default function AdminTeamsPage() {
 
         {totalPages > 1 && (
             <div className="flex items-center justify-center gap-2">
-              <Button
-                  variant="outline" size="sm"
-                  onClick={() => setPage((p) => p - 1)}
-                  disabled={page === 0}
-              >
+              <Button variant="outline" size="sm" onClick={() => setPage((p) => p - 1)} disabled={page === 0}>
                 Previous
               </Button>
-              <span className="text-sm text-muted-foreground">
-            Page {page + 1} of {totalPages}
-          </span>
-              <Button
-                  variant="outline" size="sm"
-                  onClick={() => setPage((p) => p + 1)}
-                  disabled={page >= totalPages - 1}
-              >
+              <span className="text-sm text-muted-foreground">Page {page + 1} of {totalPages}</span>
+              <Button variant="outline" size="sm" onClick={() => setPage((p) => p + 1)} disabled={page >= totalPages - 1}>
                 Next
               </Button>
             </div>
