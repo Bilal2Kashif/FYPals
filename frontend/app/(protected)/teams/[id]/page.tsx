@@ -1497,6 +1497,12 @@ function DeliverablesTabContent({ projectId }: { projectId?: number }) {
                       </Badge>
                     </div>
                 )}
+                {(d.staffComments ?? []).map((c: any) => (
+                    <div key={c.id} className="p-3 rounded-md border border-blue-300 text-sm space-y-1 mt-2" style={{ backgroundColor: '#ffffff', color: '#111827' }}>
+                      <p className="text-xs font-medium" style={{ color: '#2563eb' }}>FYP Staff Comment</p>
+                      <p style={{ color: '#111827' }}>{c.comment}</p>
+                    </div>
+                ))}
               </CardContent>
             </Card>
         ))}

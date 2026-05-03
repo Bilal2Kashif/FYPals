@@ -80,13 +80,16 @@ export default function AdminTeamDetailPage() {
         if (!searchQuery.trim()) return;
         setSearching(true);
         try {
-            const results = await api.get(`/search?q=${encodeURIComponent(searchQuery.trim())}&type=student`) as any[];
-            // Also search advisors
-            const advisorResults = await api.get(`/search?q=${encodeURIComponent(searchQuery.trim())}&type=advisor`) as any[];
-            const all = [...(Array.isArray(results) ? results : []), ...(Array.isArray(advisorResults) ? advisorResults : [])];
-            // Filter out existing members
+            // Use admin/users which returns email — /search only returns skills as description
+            const res = await api.get('/admin/users', { params: { page: 0, size: 50 } }) as any;
+            const all: any[] = res?.content ?? [];
+            const q = searchQuery.trim().toLowerCase();
             const existingIds = new Set((team?.members ?? []).map(m => m.userId));
-            setSearchResults(all.filter(u => !existingIds.has(u.id)));
+            const filtered = all.filter(u =>
+                !existingIds.has(u.id) &&
+                (u.name?.toLowerCase().includes(q) || u.email?.toLowerCase().includes(q))
+            );
+            setSearchResults(filtered.slice(0, 8));
         } catch {
             toast.error('Search failed');
         } finally {
@@ -203,13 +206,13 @@ export default function AdminTeamDetailPage() {
                                             {searchResults.map((u) => (
                                                 <div key={u.id} className="flex items-center justify-between p-3 hover:bg-muted/30">
                                                     <div>
-                                                        <p className="text-sm font-medium">{u.title}</p>
-                                                        <p className="text-xs text-muted-foreground">{u.description}</p>
+                                                        <p className="text-sm font-medium">{u.name}</p>
+                                                        <p className="text-xs text-muted-foreground">{u.email}</p>
                                                     </div>
                                                     <Button
                                                         size="sm" variant="outline"
                                                         disabled={adding}
-                                                        onClick={() => addMember(u.id, u.title)}
+                                                        onClick={() => addMember(u.id, u.name)}
                                                     >
                                                         {adding ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Add'}
                                                     </Button>

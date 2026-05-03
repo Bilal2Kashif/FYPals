@@ -547,9 +547,9 @@ export default function AdvisorTeamPage() {
                         </div>
                     )}
                     {((d as any).staffComments ?? []).map((c: any) => (
-                        <div key={c.id} className="p-3 rounded-md bg-blue-50 border border-blue-200 text-sm space-y-1">
+                        <div key={c.id} className="p-3 rounded-md border border-blue-200 bg-white text-sm space-y-1">
                           <p className="text-xs font-medium text-blue-600">FYP Staff Comment</p>
-                          <p>{c.comment}</p>
+                          <p className="text-gray-900">{c.comment}</p>
                         </div>
                     ))}
                   </CardContent>
