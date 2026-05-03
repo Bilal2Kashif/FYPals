@@ -1,5 +1,6 @@
 package com.fypals.FYPals.progress;
 
+import com.fypals.FYPals.deliverable.repository.DeliverableRepository;
 import com.fypals.FYPals.progress.entity.Checkpoint;
 import com.fypals.FYPals.progress.entity.Phase;
 import com.fypals.FYPals.progress.repository.CheckpointRepository;
@@ -24,11 +25,12 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class ProgressController {
 
-    private final ProgressService      progressService;
-    private final ProjectRepository    projectRepository;
-    private final PhaseRepository      phaseRepository;
-    private final CheckpointRepository checkpointRepository;
-    private final UserRepository       userRepository;
+    private final ProgressService       progressService;
+    private final ProjectRepository     projectRepository;
+    private final PhaseRepository       phaseRepository;
+    private final CheckpointRepository  checkpointRepository;
+    private final UserRepository        userRepository;
+    private final DeliverableRepository deliverableRepository;
 
     @GetMapping("/projects/{projectId}/progress")
     @Transactional
@@ -40,11 +42,23 @@ public class ProgressController {
             result.put("projectName",          p.getProjectName());
             result.put("status",               p.getStatus());
             result.put("completionPercentage", p.getCompletionPercentage());
+            // Bug 8 fix: add alias so both field names work for frontend
+            result.put("completionPercent",    p.getCompletionPercentage());
             result.put("startDate",            p.getStartDate());
             result.put("endDate",              p.getEndDate());
             result.put("supervisorId",         p.getSupervisorId());
             result.put("teamId",               p.getTeam() != null ? p.getTeam().getId() : null);
             result.put("teamName",             p.getTeam() != null ? p.getTeam().getTeamName() : null);
+            // Bug 8 fix: include checkpoint counts for progress display
+            long totalCps = 0, completedCps = 0;
+            for (com.fypals.FYPals.progress.entity.Phase ph : phaseRepository.findByProjectId(p.getId())) {
+                java.util.List<com.fypals.FYPals.progress.entity.Checkpoint> cps =
+                        checkpointRepository.findByPhaseId(ph.getId());
+                totalCps     += cps.size();
+                completedCps += cps.stream().filter(c -> "COMPLETE".equals(c.getStatus())).count();
+            }
+            result.put("totalCheckpoints",     totalCps);
+            result.put("completedCheckpoints", completedCps);
             return ResponseEntity.ok((Object) result);
         }).orElse(ResponseEntity.notFound().build());
     }
@@ -108,24 +122,44 @@ public class ProgressController {
         LocalDate startDate = LocalDate.parse(body.get("startDate"));
         LocalDate endDate   = LocalDate.parse(body.get("endDate"));
 
-        // FIX 10: Validate start date is not strictly before today isn't required
-        // (past dates are allowed so advisors can set historical phases)
-        // BUT end date must be after start date
         if (!startDate.isBefore(endDate)) {
-            throw new IllegalArgumentException("Start date must be before end date");
+            throw new IllegalArgumentException("Phase start date must be before end date");
         }
+
+        // Bug 5 fix: Phase end date must not exceed the earliest upcoming deliverable deadline
+        // Find the active (non-approved) deliverable for this project and validate
+        deliverableRepository.findByProjectId(projectId).stream()
+                .filter(d -> !"APPROVED".equals(d.getStatus()))
+                .min(java.util.Comparator.comparing(d -> d.getDeadline()))
+                .ifPresent(activeDeliverable -> {
+                    if (activeDeliverable.getDeadline() != null
+                            && endDate.isAfter(activeDeliverable.getDeadline())) {
+                        throw new IllegalArgumentException(
+                                "Phase end date (" + endDate + ") cannot be after the deliverable deadline ("
+                                        + activeDeliverable.getDeadline() + ")");
+                    }
+                });
 
         Phase phase = new Phase();
         phase.setName(body.get("name"));
         phase.setStartDate(startDate);
         phase.setEndDate(endDate);
+
+        // Store which deliverable this phase belongs to — permanent link
+        if (body.get("deliverableId") != null && !body.get("deliverableId").isEmpty()) {
+            try {
+                phase.setDeliverableId(Long.parseLong(body.get("deliverableId")));
+            } catch (NumberFormatException ignored) {}
+        }
+
         Phase saved = progressService.addPhase(projectId, phase);
         Map<String, Object> result = new HashMap<>();
-        result.put("id",        saved.getId());
-        result.put("name",      saved.getName());
-        result.put("startDate", saved.getStartDate());
-        result.put("endDate",   saved.getEndDate());
-        result.put("projectId", projectId);
+        result.put("id",            saved.getId());
+        result.put("name",          saved.getName());
+        result.put("startDate",     saved.getStartDate());
+        result.put("endDate",       saved.getEndDate());
+        result.put("projectId",     projectId);
+        result.put("deliverableId", saved.getDeliverableId());
         return ResponseEntity.ok(result);
     }
 
@@ -135,11 +169,12 @@ public class ProgressController {
         List<Phase> phases = phaseRepository.findByProjectId(projectId);
         return ResponseEntity.ok(phases.stream().map(p -> {
             Map<String, Object> m = new HashMap<>();
-            m.put("id",        p.getId());
-            m.put("name",      p.getName());
-            m.put("startDate", p.getStartDate());
-            m.put("endDate",   p.getEndDate());
-            m.put("projectId", projectId);
+            m.put("id",            p.getId());
+            m.put("name",          p.getName());
+            m.put("startDate",     p.getStartDate());
+            m.put("endDate",       p.getEndDate());
+            m.put("projectId",     projectId);
+            m.put("deliverableId", p.getDeliverableId());
             return m;
         }).toList());
     }
@@ -161,13 +196,30 @@ public class ProgressController {
         cp.setStatus("TODO");
 
         if (body.get("deadline") != null && !body.get("deadline").isEmpty()) {
-            cp.setDeadline(LocalDate.parse(body.get("deadline")));
+            LocalDate cpDeadline = LocalDate.parse(body.get("deadline"));
+            // Validate checkpoint deadline is within the phase's date range
+            if (phase.getStartDate() != null && cpDeadline.isBefore(phase.getStartDate())) {
+                throw new IllegalArgumentException(
+                        "Checkpoint deadline (" + cpDeadline + ") cannot be before the phase start date ("
+                                + phase.getStartDate() + ")");
+            }
+            if (phase.getEndDate() != null && cpDeadline.isAfter(phase.getEndDate())) {
+                throw new IllegalArgumentException(
+                        "Checkpoint deadline (" + cpDeadline + ") cannot be after the phase end date ("
+                                + phase.getEndDate() + ")");
+            }
+            cp.setDeadline(cpDeadline);
         }
         if (body.get("assignedToId") != null && !body.get("assignedToId").isEmpty()) {
             userRepository.findById(Long.valueOf(body.get("assignedToId"))).ifPresent(cp::setAssignedTo);
         }
 
         Checkpoint saved = checkpointRepository.save(cp);
+
+        // Bug 8 fix: recalculate project completion when checkpoint added
+        // so TODO checkpoints immediately count in the denominator
+        progressService.recalculateProjectCompletion(phase.getProject().getId());
+
         return ResponseEntity.ok(toCheckpointMap(saved, phaseId));
     }
 

@@ -72,11 +72,11 @@ public class InviteService {
         notification.setRead(true);
         notificationRepository.save(notification);
 
-        // Notify the team leader
+        // Notify the team leader — use INVITE_ACCEPTED so no Accept/Decline buttons shown on leader side
         notificationService.sendNotification(
                 team.getLeader().getId(),
                 user.getName() + " accepted your invite to join " + team.getTeamName(),
-                "TEAM_INVITE",
+                "INVITE_ACCEPTED",
                 teamId
         );
 
@@ -96,11 +96,11 @@ public class InviteService {
         notification.setRead(true);
         notificationRepository.save(notification);
 
-        // Notify the team leader
+        // Notify the team leader — use INVITE_ACCEPTED so no Accept/Decline buttons shown on leader side
         notificationService.sendNotification(
                 team.getLeader().getId(),
                 advisor.getName() + " accepted your invitation to supervise team " + team.getTeamName(),
-                "ADVISOR_INVITE",
+                "INVITE_ACCEPTED",
                 team.getId()
         );
 
@@ -123,10 +123,14 @@ public class InviteService {
         notification.setRead(true);
         notificationRepository.save(notification);
 
+        // Notify the leader with INVITE_DECLINED — informational only, no action buttons
+        String declineMsg = "ADVISOR_INVITE".equals(notification.getType())
+                ? user.getName() + " declined your invitation to supervise team " + team.getTeamName()
+                : user.getName() + " declined your invite to join " + team.getTeamName();
         notificationService.sendNotification(
                 team.getLeader().getId(),
-                user.getName() + " declined your invite to join " + team.getTeamName(),
-                "TEAM_INVITE",
+                declineMsg,
+                "INVITE_DECLINED",
                 teamId
         );
 

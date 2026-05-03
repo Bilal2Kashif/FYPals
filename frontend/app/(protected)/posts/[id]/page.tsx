@@ -17,7 +17,7 @@ import type { Post, Comment } from '@/types';
 
 const CATEGORY_LABELS: Record<string, string> = {
   LOOKING_FOR_MEMBER: 'Looking for Member',
-  PROJECT_IDEA: 'Project Idea',
+  PROJECT_IDEA: 'Project',
   GENERAL: 'General',
 };
 

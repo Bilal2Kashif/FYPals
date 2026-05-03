@@ -91,6 +91,8 @@ export interface Post {
   description: string;
   category: PostCategory;
   voteCount: number;
+  upvoteCount?: number;
+  downvoteCount?: number;
   commentCount: number;
   createdAt: string;
 }

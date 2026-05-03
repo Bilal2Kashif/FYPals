@@ -7,7 +7,7 @@ import {
   FileText,
   Users,
   Search,
-  UserCog,
+  UserCog, Mail,
   GraduationCap,
 } from 'lucide-react';
 import { useAuthStore } from '@/store/authStore';
@@ -43,6 +43,7 @@ const adminLinks: NavItem[] = [
   { label: 'Users',     href: '/admin/users',     icon: <UserCog         className="h-4 w-4" /> },
   { label: 'Teams',     href: '/admin/teams',     icon: <Users           className="h-4 w-4" /> },
   { label: 'Posts',     href: '/admin/posts',     icon: <FileText        className="h-4 w-4" /> },
+  { label: 'Email',     href: '/admin/email',     icon: <Mail            className="h-4 w-4" /> },
 ];
 
 export function Sidebar() {

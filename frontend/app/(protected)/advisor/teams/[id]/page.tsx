@@ -256,15 +256,109 @@ export default function AdvisorTeamPage() {
 
           {/* ── Progress tab ── deliverable-based boxes (read-only) ── */}
           <TabsContent value="progress" className="space-y-4">
-            <Card>
-              <CardContent className="p-4 space-y-2">
-                <div className="flex justify-between items-center">
-                  <p className="text-sm font-medium">Overall Progress</p>
-                  <span className="font-bold text-lg">{Math.round(pct)}%</span>
-                </div>
-                <Progress value={pct} />
-              </CardContent>
-            </Card>
+            {/* ── Report 4: Circular progress + Deliverable status donut ── */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Left: circular overall progress ring */}
+              <Card>
+                <CardContent className="p-5 flex items-center gap-5">
+                  <div className="relative shrink-0">
+                    <svg width="100" height="100" viewBox="0 0 128 128">
+                      <circle cx="64" cy="64" r="54" fill="none" stroke="currentColor"
+                              strokeWidth="10" strokeOpacity="0.12" />
+                      <circle cx="64" cy="64" r="54" fill="none"
+                              stroke={pct >= 100 ? "#22c55e" : "#a855f7"}
+                              strokeWidth="10" strokeLinecap="round"
+                              strokeDasharray={2 * Math.PI * 54}
+                              strokeDashoffset={2 * Math.PI * 54 - (pct / 100) * 2 * Math.PI * 54}
+                              transform="rotate(-90 64 64)"
+                              style={{ transition: "stroke-dashoffset 0.8s ease" }}
+                      />
+                    </svg>
+                    <div className="absolute inset-0 flex flex-col items-center justify-center">
+                      <span className="text-xl font-bold" style={{ color: pct >= 100 ? "#22c55e" : "#a855f7" }}>
+                        {Math.round(pct)}%
+                      </span>
+                      <span className="text-[9px] text-muted-foreground">done</span>
+                    </div>
+                  </div>
+                  <div>
+                    <p className="font-semibold text-sm">Overall Progress</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Checkpoint completion across all phases
+                    </p>
+                    {pct >= 100 && <p className="text-xs text-green-600 mt-1 font-medium">🎉 All done!</p>}
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Right: deliverable status donut */}
+              {deliverables.length > 0 && (() => {
+                const counts = {
+                  APPROVED:          deliverables.filter((d: any) => d.status === 'APPROVED').length,
+                  SUBMITTED:         deliverables.filter((d: any) => d.status === 'SUBMITTED').length,
+                  CHANGES_REQUESTED: deliverables.filter((d: any) => d.status === 'CHANGES_REQUESTED').length,
+                  PENDING:           deliverables.filter((d: any) => d.status === 'PENDING').length,
+                };
+                const slices = [
+                  { label: 'Approved',  value: counts.APPROVED,          color: '#22c55e' },
+                  { label: 'Submitted', value: counts.SUBMITTED,         color: '#3b82f6' },
+                  { label: 'Changes',   value: counts.CHANGES_REQUESTED,  color: '#ef4444' },
+                  { label: 'Pending',   value: counts.PENDING,            color: '#6b7280' },
+                ].filter(s => s.value > 0);
+
+                const total = deliverables.length;
+                const R = 40; const CX = 60; const CY = 60;
+                const C = 2 * Math.PI * R;
+
+                let cumulative = 0;
+                const arcs = slices.map(s => {
+                  const dash   = (s.value / total) * C;
+                  const gap    = C - dash;
+                  const offset = C - cumulative * (C / total);
+                  cumulative  += s.value;
+                  return { ...s, dash, gap, offset };
+                });
+
+                return (
+                    <Card>
+                      <CardContent className="p-5 flex items-center gap-4">
+                        <div className="relative shrink-0">
+                          <svg width="120" height="120" viewBox="0 0 120 120">
+                            {arcs.map((arc, i) => (
+                                <circle key={i} cx={CX} cy={CY} r={R}
+                                        fill="none" stroke={arc.color} strokeWidth="18"
+                                        strokeDasharray={`${arc.dash} ${arc.gap}`}
+                                        strokeDashoffset={arc.offset}
+                                        transform={`rotate(-90 ${CX} ${CY})`}
+                                        style={{ transition: 'stroke-dashoffset 0.6s ease' }}
+                                />
+                            ))}
+                            <text x={CX} y={CY + 5} textAnchor="middle"
+                                  fontSize="14" fontWeight="700" fill="currentColor"
+                                  style={{ fontFamily: 'inherit' }}>
+                              {total}
+                            </text>
+                            <text x={CX} y={CY + 17} textAnchor="middle"
+                                  fontSize="8" fill="#888" style={{ fontFamily: 'inherit' }}>
+                              total
+                            </text>
+                          </svg>
+                        </div>
+                        <div className="space-y-1.5 min-w-0">
+                          <p className="font-semibold text-sm mb-2">Deliverable Status</p>
+                          {slices.map(s => (
+                              <div key={s.label} className="flex items-center gap-2 text-xs">
+                                <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: s.color }} />
+                                <span className="text-muted-foreground">{s.label}</span>
+                                <span className="font-semibold ml-auto">{s.value}</span>
+                              </div>
+                          ))}
+                        </div>
+                      </CardContent>
+                    </Card>
+                );
+              })()}
+            </div>
 
             {deliverables.length === 0 && (
                 <p className="text-sm text-muted-foreground">No deliverables yet. Create one in the Deliverables tab.</p>

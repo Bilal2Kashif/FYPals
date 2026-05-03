@@ -129,3 +129,19 @@ header {
   background-color: hsl(var(--navbar-bg)) !important;
   border-color: hsl(var(--sidebar-border)) !important;
 }
+
+/* Bug 9 fix: Date/datetime input calendar picker must be visible in dark mode.
+   The native OS calendar popup inherits color-scheme, so we force light on the
+   input widget itself to ensure the popup renders with a white/light background. */
+input[type="date"],
+input[type="datetime-local"],
+input[type="time"] {
+  color-scheme: light;
+}
+.dark input[type="date"],
+.dark input[type="datetime-local"],
+.dark input[type="time"] {
+  color-scheme: dark;
+  background-color: hsl(var(--input));
+  color: hsl(var(--foreground));
+}

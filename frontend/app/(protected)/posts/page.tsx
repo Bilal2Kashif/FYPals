@@ -19,7 +19,7 @@ import api from '@/lib/api';
 const CATEGORIES = [
   { value: 'LOOKING_FOR_MEMBER',  label: 'Looking for Member',  color: 'bg-green-100 text-green-700' },
   { value: 'LOOKING_FOR_ADVISOR', label: 'Looking for Advisor', color: 'bg-purple-100 text-purple-700' },
-  { value: 'PROJECT_IDEA',        label: 'Project Idea',        color: 'bg-blue-100 text-blue-700' },
+  { value: 'PROJECT_IDEA',        label: 'Project',        color: 'bg-blue-100 text-blue-700' },
   { value: 'REQUIREMENT',         label: 'Requirement',         color: 'bg-amber-100 text-amber-700' },
   { value: 'GENERAL',             label: 'General',             color: 'bg-gray-100 text-gray-700' },
 ];

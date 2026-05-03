@@ -73,4 +73,23 @@ public class TeamController {
         teamService.dropMember(leaderId, teamId, memberId);
         return ResponseEntity.ok(Map.of("message", "Member dropped successfully"));
     }
+
+    @PostMapping("/{teamId}/leave")
+    public ResponseEntity<?> leaveTeam(
+            @AuthenticationPrincipal UserDetails userDetails,
+            @PathVariable Long teamId) {
+        Long userId = getUserId(userDetails);
+        teamService.leaveTeam(userId, teamId);
+        return ResponseEntity.ok(Map.of("message", "You have left the team"));
+    }
+
+    @PostMapping("/{teamId}/transfer-and-leave")
+    public ResponseEntity<?> transferAndLeave(
+            @AuthenticationPrincipal UserDetails userDetails,
+            @PathVariable Long teamId,
+            @RequestParam Long newLeaderId) {
+        Long currentLeaderId = getUserId(userDetails);
+        teamService.transferLeadershipAndLeave(currentLeaderId, teamId, newLeaderId);
+        return ResponseEntity.ok(Map.of("message", "Leadership transferred and you have left the team"));
+    }
 }

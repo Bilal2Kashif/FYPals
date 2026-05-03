@@ -59,6 +59,14 @@ public class AdminController {
         return ResponseEntity.ok(Map.of("message", "User created successfully"));
     }
 
+    @PutMapping("/users/{id}/password")
+    public ResponseEntity<?> changePassword(
+            @PathVariable Long id,
+            @RequestBody Map<String, String> body) {
+        adminService.changePassword(id, body.get("password"));
+        return ResponseEntity.ok(Map.of("message", "Password updated successfully"));
+    }
+
     @PutMapping("/users/{id}/role")
     public ResponseEntity<?> updateRole(
             @PathVariable Long id,
@@ -85,10 +93,43 @@ public class AdminController {
         return ResponseEntity.ok(adminService.getAllTeams(pageable));
     }
 
+    @GetMapping("/teams/{id}")
+    public ResponseEntity<?> getTeamDetail(@PathVariable Long id) {
+        return ResponseEntity.ok(adminService.getTeamDetail(id));
+    }
+
+    @PostMapping("/teams/{id}/members")
+    public ResponseEntity<?> addMember(
+            @PathVariable Long id,
+            @RequestBody Map<String, Long> body) {
+        adminService.addMemberToTeam(id, body.get("userId"));
+        return ResponseEntity.ok(Map.of("message", "Member added successfully"));
+    }
+
+    @DeleteMapping("/teams/{id}/members/{userId}")
+    public ResponseEntity<?> removeMember(
+            @PathVariable Long id,
+            @PathVariable Long userId) {
+        adminService.removeMemberFromTeam(id, userId);
+        return ResponseEntity.ok(Map.of("message", "Member removed successfully"));
+    }
+
     @DeleteMapping("/teams/{id}")
     public ResponseEntity<?> deleteTeam(@PathVariable Long id) {
         adminService.deleteTeam(id);
         return ResponseEntity.ok(Map.of("message", "Team deleted successfully"));
+    }
+
+    // ── Email ─────────────────────────────────────────────────────────────────
+
+    @PostMapping("/send-email")
+    public ResponseEntity<?> sendEmail(@RequestBody Map<String, String> body) {
+        adminService.sendEmailToUser(
+                body.get("to"),
+                body.get("subject"),
+                body.get("message")
+        );
+        return ResponseEntity.ok(Map.of("message", "Email sent successfully"));
     }
 
     // ── Posts ─────────────────────────────────────────────────────────────────

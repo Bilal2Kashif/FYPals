@@ -16,6 +16,8 @@ public class AdminPostDTO {
     private String authorName;
     private Long authorId;
     private int voteCount;
+    private int upvoteCount;
+    private int downvoteCount;
     private int commentCount;
     private LocalDateTime createdAt;
 }

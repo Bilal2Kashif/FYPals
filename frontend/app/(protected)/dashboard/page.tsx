@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Users, FileText, Search, AlertCircle, Sparkles, UserCheck } from 'lucide-react';
+import { Users, FileText, Search, AlertCircle, Sparkles, UserCheck, BookOpen } from 'lucide-react';
 import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -15,45 +15,66 @@ import api from '@/lib/api';
 import { useAuthStore } from '@/store/authStore';
 import type { User, Notification } from '@/types';
 
+const CATEGORY_LABELS: Record<string, string> = {
+  LOOKING_FOR_MEMBER: 'Looking for Member',
+  PROJECT_IDEA:       'Project',
+  GENERAL:            'General',
+};
+
 export default function DashboardPage() {
   const { user: authUser } = useAuthStore();
   const router = useRouter();
   const [profile, setProfile]             = useState<User | null>(null);
   const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [matches, setMatches]             = useState<any[]>([]);
+  const [studentMatches, setStudentMatches] = useState<any[]>([]);
+  const [advisorMatches, setAdvisorMatches] = useState<any[]>([]);
+  const [postMatches, setPostMatches]       = useState<any[]>([]);
   const [loading, setLoading]             = useState(true);
 
   useEffect(() => {
-    if (authUser?.role === 'ADMIN') { router.replace('/admin/dashboard'); return; }
-    if (authUser?.role === 'ADVISOR') { router.replace('/advisor/dashboard'); return; }
+    if (authUser?.role === 'ADMIN')     { router.replace('/admin/dashboard');     return; }
+    if (authUser?.role === 'ADVISOR')   { router.replace('/advisor/dashboard');   return; }
     if (authUser?.role === 'FYP_STAFF') { router.replace('/fyp-staff/dashboard'); return; }
 
     const load = async () => {
       try {
         const [p, n] = await Promise.all([
           api.get('/users/me/profile') as unknown as Promise<User>,
-          api.get('/notifications') as unknown as Promise<Notification[]>,
+          api.get('/notifications')   as unknown as Promise<Notification[]>,
         ]);
         setProfile(p);
         setNotifications(Array.isArray(n) ? n.slice(0, 5) : []);
 
-        // Feature 8: Match with students of similar interests/skills
-        // Search using the user's own skills/interests as keyword
-        if (p?.skills || p?.interests) {
-          const keyword = (p.skills || p.interests || '').split(',')[0]?.trim();
-          if (keyword) {
-            try {
-              const searchRes = await api.get('/search', {
-                params: { q: keyword, type: 'student' },
-              }) as any[];
-              // Filter out self, limit to 4 matches
-              const filtered = (Array.isArray(searchRes) ? searchRes : [])
-                  .filter((r: any) => r.id !== p.id)
-                  .slice(0, 4);
-              setMatches(filtered);
-            } catch {
-              // Silently ignore match failures
-            }
+        // Build keyword from skills or interests — take first token
+        const keyword = (p?.skills || p?.interests || '').split(',')[0]?.trim();
+        if (keyword) {
+          // Fire 3 searches in parallel — silently ignore individual failures
+          const [studentsRes, advisorsRes, postsRes] = await Promise.allSettled([
+            api.get('/search', { params: { q: keyword, type: 'student'  } }) as Promise<any[]>,
+            api.get('/search', { params: { q: keyword, type: 'advisor'  } }) as Promise<any[]>,
+            api.get('/search', { params: { q: keyword, type: 'post'     } }) as Promise<any[]>,
+          ]);
+
+          if (studentsRes.status === 'fulfilled') {
+            setStudentMatches(
+                (Array.isArray(studentsRes.value) ? studentsRes.value : [])
+                    .filter((r: any) => r.id !== p.id)
+                    .slice(0, 4)
+            );
+          }
+          if (advisorsRes.status === 'fulfilled') {
+            setAdvisorMatches(
+                (Array.isArray(advisorsRes.value) ? advisorsRes.value : [])
+                    .slice(0, 4)
+            );
+          }
+          if (postsRes.status === 'fulfilled') {
+            // Only show PROJECT_IDEA posts in this section
+            setPostMatches(
+                (Array.isArray(postsRes.value) ? postsRes.value : [])
+                    .filter((r: any) => r.extra === 'PROJECT_IDEA')
+                    .slice(0, 4)
+            );
           }
         }
       } catch (err: any) {
@@ -78,9 +99,11 @@ export default function DashboardPage() {
   }
 
   const unreadNotifications = notifications.filter(n => !n.read);
+  const hasAnyMatch = studentMatches.length > 0 || advisorMatches.length > 0 || postMatches.length > 0;
 
   return (
       <div className="space-y-6 max-w-4xl">
+
         {/* Welcome */}
         <div>
           <h1 className="text-2xl font-bold">Welcome back, {profile?.name ?? authUser?.name}!</h1>
@@ -92,7 +115,7 @@ export default function DashboardPage() {
           </p>
         </div>
 
-        {/* Profile incomplete alert — students only */}
+        {/* Profile incomplete alert */}
         {profile && !profile.profileComplete && profile.role === 'STUDENT' && (
             <div className="flex items-start gap-3 p-4 rounded-lg border border-amber-200 bg-amber-50 text-amber-800">
               <AlertCircle className="h-5 w-5 shrink-0 mt-0.5" />
@@ -139,40 +162,95 @@ export default function DashboardPage() {
           </Card>
         </div>
 
-        {/* Feature 8: Suggested Matches */}
-        {matches.length > 0 && (
+        {/* Suggested Matches — only shown if there is at least one result */}
+        {hasAnyMatch && (
             <Card>
               <CardHeader>
                 <CardTitle className="text-base flex items-center gap-2">
                   <Sparkles className="h-4 w-4 text-amber-500" />
                   Suggested Matches
-                  <span className="text-xs font-normal text-muted-foreground">(based on your skills)</span>
+                  <span className="text-xs font-normal text-muted-foreground">(based on your skills &amp; interests)</span>
                 </CardTitle>
               </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {matches.map((m: any) => (
-                      <Link key={m.id} href={`/profile/${m.id}`} className="flex items-center gap-3 p-3 border rounded-lg hover:bg-muted/50 transition-colors">
-                        <Avatar className="h-9 w-9 shrink-0">
-                          <AvatarFallback className="text-xs">
-                            {m.title?.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase()}
-                          </AvatarFallback>
-                        </Avatar>
-                        <div className="min-w-0">
-                          <p className="text-sm font-medium truncate">{m.title}</p>
-                          {m.description && (
-                              <p className="text-xs text-muted-foreground truncate">{m.description}</p>
-                          )}
-                          <Badge variant="outline" className="text-xs mt-0.5">
-                            <UserCheck className="h-2.5 w-2.5 mr-1" />
-                            {m.type === 'student' ? 'Student' : 'Advisor'}
-                          </Badge>
-                        </div>
-                      </Link>
-                  ))}
-                </div>
-                <Button variant="ghost" size="sm" asChild className="mt-3 w-full">
-                  <Link href="/search">Search more people →</Link>
+              <CardContent className="space-y-5">
+
+                {/* Students */}
+                {studentMatches.length > 0 && (
+                    <div>
+                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2 flex items-center gap-1">
+                        <UserCheck className="h-3.5 w-3.5" /> Students
+                      </p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {studentMatches.map((m: any) => (
+                            <Link key={m.id} href={`/profile/${m.id}`}
+                                  className="flex items-center gap-3 p-3 border rounded-lg hover:bg-muted/50 transition-colors">
+                              <Avatar className="h-8 w-8 shrink-0">
+                                <AvatarFallback className="text-xs">
+                                  {m.title?.split(' ').map((w: string) => w[0]).join('').slice(0, 2).toUpperCase()}
+                                </AvatarFallback>
+                              </Avatar>
+                              <div className="min-w-0">
+                                <p className="text-sm font-medium truncate">{m.title}</p>
+                                {m.description && <p className="text-xs text-muted-foreground truncate">{m.description}</p>}
+                              </div>
+                            </Link>
+                        ))}
+                      </div>
+                    </div>
+                )}
+
+                {/* Advisors */}
+                {advisorMatches.length > 0 && (
+                    <div>
+                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2 flex items-center gap-1">
+                        <UserCheck className="h-3.5 w-3.5" /> Advisors
+                      </p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {advisorMatches.map((m: any) => (
+                            <Link key={m.id} href={`/profile/${m.id}`}
+                                  className="flex items-center gap-3 p-3 border rounded-lg hover:bg-muted/50 transition-colors">
+                              <Avatar className="h-8 w-8 shrink-0">
+                                <AvatarFallback className="text-xs">
+                                  {m.title?.split(' ').map((w: string) => w[0]).join('').slice(0, 2).toUpperCase()}
+                                </AvatarFallback>
+                              </Avatar>
+                              <div className="min-w-0">
+                                <p className="text-sm font-medium truncate">{m.title}</p>
+                                {m.description && <p className="text-xs text-muted-foreground truncate">{m.description}</p>}
+                                <Badge variant="outline" className="text-xs mt-0.5">Advisor</Badge>
+                              </div>
+                            </Link>
+                        ))}
+                      </div>
+                    </div>
+                )}
+
+                {/* Project posts */}
+                {postMatches.length > 0 && (
+                    <div>
+                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2 flex items-center gap-1">
+                        <BookOpen className="h-3.5 w-3.5" /> Projects
+                      </p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {postMatches.map((m: any) => (
+                            <Link key={m.id} href={`/posts/${m.id}`}
+                                  className="flex items-center gap-3 p-3 border rounded-lg hover:bg-muted/50 transition-colors">
+                              <div className="p-2 rounded-full bg-blue-100 shrink-0">
+                                <BookOpen className="h-3.5 w-3.5 text-blue-600" />
+                              </div>
+                              <div className="min-w-0">
+                                <p className="text-sm font-medium truncate">{m.title}</p>
+                                {m.description && <p className="text-xs text-muted-foreground truncate">{m.description}</p>}
+                                <Badge variant="secondary" className="text-xs mt-0.5">Project</Badge>
+                              </div>
+                            </Link>
+                        ))}
+                      </div>
+                    </div>
+                )}
+
+                <Button variant="ghost" size="sm" asChild className="w-full">
+                  <Link href="/search">Search more →</Link>
                 </Button>
               </CardContent>
             </Card>

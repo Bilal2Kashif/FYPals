@@ -6,10 +6,11 @@ import com.fypals.FYPals.user.service.UserService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.core.Authentication;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.Map;
 
 @RestController
 @RequestMapping("/users")
@@ -40,5 +41,17 @@ public class UserController {
     @GetMapping("/by-email")
     public ResponseEntity<ProfileResponse> getProfileByEmail(@RequestParam String email) {
         return ResponseEntity.ok(userService.getProfileByEmail(email));
+    }
+
+    @PutMapping("/me/password")
+    public ResponseEntity<?> changePassword(
+            @AuthenticationPrincipal UserDetails userDetails,
+            @RequestBody Map<String, String> body) {
+        userService.changePassword(
+                userDetails.getUsername(),
+                body.get("oldPassword"),
+                body.get("newPassword")
+        );
+        return ResponseEntity.ok(Map.of("message", "Password changed successfully"));
     }
 }

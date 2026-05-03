@@ -164,6 +164,7 @@ public class TeamService {
         result.put("leaderId", team.getLeader().getId());
         result.put("leaderName", team.getLeader().getName());
         result.put("memberCount", team.getMembers().size());
+        result.put("createdAt", team.getCreatedAt());
 
         List<Map<String, Object>> members = team.getMembers().stream()
                 .map(m -> {
@@ -207,6 +208,83 @@ public class TeamService {
                 memberId,
                 "You have been removed from team: " + team.getTeamName(),
                 "TEAM_DROPPED",
+                teamId
+        );
+    }
+
+    // ── Leave team (member) ──────────────────────────────────────────────────────
+    @Transactional
+    public void leaveTeam(Long userId, Long teamId) {
+        Team team = teamRepository.findById(teamId)
+                .orElseThrow(() -> new EntityNotFoundException("Team not found"));
+
+        boolean isLeader = team.getLeader().getId().equals(userId);
+
+        if (isLeader) {
+            // Count active members (excluding dropped)
+            long activeMemberCount = teamMemberRepository.findByTeamId(teamId)
+                    .stream()
+                    .filter(m -> m.getDropDate() == null)
+                    .count();
+
+            if (activeMemberCount > 1) {
+                throw new RuntimeException("Leader must transfer leadership before leaving when other members exist");
+            }
+            // Only member — allowed to leave (disbands the team effectively)
+        }
+
+        TeamMember member = teamMemberRepository.findByTeamIdAndUserId(teamId, userId)
+                .orElseThrow(() -> new RuntimeException("You are not a member of this team"));
+
+        teamMemberRepository.delete(member);
+
+        if (!isLeader) {
+            notificationService.sendNotification(
+                    team.getLeader().getId(),
+                    "A member has left your team: " + team.getTeamName(),
+                    "TEAM_DROPPED",
+                    teamId
+            );
+        }
+    }
+
+    // ── Transfer leadership then leave ────────────────────────────────────────
+    @Transactional
+    public void transferLeadershipAndLeave(Long currentLeaderId, Long teamId, Long newLeaderId) {
+        Team team = teamRepository.findById(teamId)
+                .orElseThrow(() -> new EntityNotFoundException("Team not found"));
+
+        if (!team.getLeader().getId().equals(currentLeaderId)) {
+            throw new RuntimeException("Only the current leader can transfer leadership");
+        }
+        if (currentLeaderId.equals(newLeaderId)) {
+            throw new RuntimeException("Cannot transfer leadership to yourself");
+        }
+
+        // Verify new leader is an active member
+        TeamMember newLeaderMember = teamMemberRepository.findByTeamIdAndUserId(teamId, newLeaderId)
+                .orElseThrow(() -> new RuntimeException("Selected member is not in this team"));
+
+        // Find the new leader's User
+        User newLeader = newLeaderMember.getUser();
+
+        // Update team leader
+        team.setLeader(newLeader);
+        teamRepository.save(team);
+
+        // Update member roles
+        newLeaderMember.setMemberRole(com.fypals.FYPals.enums.MemberRole.LEADER);
+        teamMemberRepository.save(newLeaderMember);
+
+        // Remove old leader from members
+        teamMemberRepository.findByTeamIdAndUserId(teamId, currentLeaderId)
+                .ifPresent(teamMemberRepository::delete);
+
+        // Notify new leader
+        notificationService.sendNotification(
+                newLeaderId,
+                "You are now the leader of team: " + team.getTeamName(),
+                "TEAM_INVITE",
                 teamId
         );
     }

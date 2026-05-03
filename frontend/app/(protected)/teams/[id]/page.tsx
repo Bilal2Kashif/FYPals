@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
-import { useParams } from 'next/navigation';
+import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useParams, useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { UserPlus, Loader2, Crown, Plus, Trash2, Lock, Pencil, GraduationCap } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -48,20 +48,31 @@ function formatDateTime(raw: string | null | undefined): string {
 export default function TeamWorkspacePage() {
   const { id } = useParams<{ id: string }>();
   const { user } = useAuthStore();
-  const [team, setTeam]       = useState<Team | null>(null);
-  const [project, setProject] = useState<any>(null);
-  const [advisor, setAdvisor] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
+  const router = useRouter();
+  const [team, setTeam]             = useState<Team | null>(null);
+  const [project, setProject]       = useState<any>(null);
+  const [advisor, setAdvisor]       = useState<any>(null);
+  const [timelineDelivs, setTimelineDelivs] = useState<any[]>([]);
+  const [loading, setLoading]       = useState(true);
 
-  // Student invite
+  // Student invite — two-step: enter email → preview profile → confirm
   const [inviteStudentOpen, setInviteStudentOpen] = useState(false);
   const [inviteEmail, setInviteEmail]             = useState('');
-  const [inviting, setInviting]                   = useState(false);
+  const [invitePreview, setInvitePreview]         = useState<any | null>(null); // fetched profile
+  const [inviting, setInviting]                   = useState(false);            // loading either step
 
-  // Advisor invite
+  // Advisor invite — same two-step flow
   const [inviteAdvisorOpen, setInviteAdvisorOpen] = useState(false);
   const [advisorEmail, setAdvisorEmail]           = useState('');
+  const [advisorPreview, setAdvisorPreview]       = useState<any | null>(null);
   const [invitingAdvisor, setInvitingAdvisor]     = useState(false);
+
+  // Leave team state
+  const [leaveOpen, setLeaveOpen]                   = useState(false);
+  const [transferOpen, setTransferOpen]             = useState(false);
+  const [selectedNewLeader, setSelectedNewLeader]   = useState('');
+  const [confirmTransferOpen, setConfirmTransferOpen] = useState(false);
+  const [leavingTeam, setLeavingTeam]               = useState(false);
 
   // Edit project name/description
   const [editProjectOpen, setEditProjectOpen] = useState(false);
@@ -92,6 +103,13 @@ export default function TeamWorkspacePage() {
         } else {
           setAdvisor(null);
         }
+        // Fetch deliverables for the timeline
+        try {
+          const delivData = await api.get(`/deliverables/project/${proj.id}`) as any;
+          setTimelineDelivs(Array.isArray(delivData) ? delivData : []);
+        } catch {
+          setTimelineDelivs([]);
+        }
       }
     } catch (err: any) {
       toast.error(err?.response?.data?.message ?? 'Failed to load team');
@@ -106,38 +124,92 @@ export default function TeamWorkspacePage() {
   const projectId   = (team as any)?.project?.id ?? project?.id;
   const hasSupervisor = !!(team as any)?.project?.supervisorId;
 
-  const handleInviteStudent = async () => {
+  // Step 1 — fetch student profile and show preview
+  const fetchStudentPreview = async () => {
     if (!inviteEmail.trim()) return;
     setInviting(true);
     try {
-      const userResult = await api.get(
+      const result = await api.get(
           `/users/by-email?email=${encodeURIComponent(inviteEmail)}`
       ) as any;
-      if (!userResult?.id) { toast.error('Student not found'); return; }
-      await api.post(`/teams/${id}/invite-student?targetUserId=${userResult.id}`);
-      toast.success('Invitation sent!');
-      setInviteStudentOpen(false);
-      setInviteEmail('');
+      if (!result?.id) { toast.error('Student not found'); return; }
+      setInvitePreview(result);
     } catch (err: any) {
       toast.error(err?.response?.data?.message ?? 'Student not found');
     } finally { setInviting(false); }
   };
 
-  const handleInviteAdvisor = async () => {
+  // Step 2 — confirm and send student invite
+  const handleInviteStudent = async () => {
+    if (!invitePreview?.id) return;
+    setInviting(true);
+    try {
+      await api.post(`/teams/${id}/invite-student?targetUserId=${invitePreview.id}`);
+      toast.success('Invitation sent!');
+      setInviteStudentOpen(false);
+      setInviteEmail('');
+      setInvitePreview(null);
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message ?? 'Failed to send invite');
+    } finally { setInviting(false); }
+  };
+
+  // Step 1 — fetch advisor profile and show preview
+  const fetchAdvisorPreview = async () => {
     if (!advisorEmail.trim()) return;
     setInvitingAdvisor(true);
     try {
-      const userResult = await api.get(
+      const result = await api.get(
           `/users/by-email?email=${encodeURIComponent(advisorEmail)}`
       ) as any;
-      if (!userResult?.id) { toast.error('Advisor not found'); return; }
-      await api.post(`/teams/${id}/invite-advisor?advisorId=${userResult.id}`);
+      if (!result?.id) { toast.error('Advisor not found'); return; }
+      setAdvisorPreview(result);
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message ?? 'Advisor not found');
+    } finally { setInvitingAdvisor(false); }
+  };
+
+  // Step 2 — confirm and send advisor invite
+  const handleInviteAdvisor = async () => {
+    if (!advisorPreview?.id) return;
+    setInvitingAdvisor(true);
+    try {
+      await api.post(`/teams/${id}/invite-advisor?advisorId=${advisorPreview.id}`);
       toast.success('Advisor invitation sent!');
       setInviteAdvisorOpen(false);
       setAdvisorEmail('');
+      setAdvisorPreview(null);
     } catch (err: any) {
       toast.error(err?.response?.data?.message ?? 'Failed to invite advisor');
     } finally { setInvitingAdvisor(false); }
+  };
+
+  // Member leaves team
+  const handleLeaveTeam = async () => {
+    setLeavingTeam(true);
+    try {
+      await api.post(`/teams/${id}/leave`);
+      toast.success('You have left the team');
+      setLeaveOpen(false);
+      router.replace('/teams');
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message ?? 'Failed to leave team');
+    } finally { setLeavingTeam(false); }
+  };
+
+  // Leader transfers leadership then leaves
+  const handleTransferAndLeave = async () => {
+    if (!selectedNewLeader) return;
+    setLeavingTeam(true);
+    try {
+      await api.post(`/teams/${id}/transfer-and-leave?newLeaderId=${selectedNewLeader}`);
+      toast.success('Leadership transferred. You have left the team.');
+      setConfirmTransferOpen(false);
+      setTransferOpen(false);
+      router.replace('/teams');
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message ?? 'Failed to transfer leadership');
+    } finally { setLeavingTeam(false); }
   };
 
   const handleDrop = async (memberId: number, memberName: string) => {
@@ -197,47 +269,149 @@ export default function TeamWorkspacePage() {
           {isLeader && (
               <div className="flex gap-2 flex-wrap">
                 {/* Invite Student */}
-                <Dialog open={inviteStudentOpen} onOpenChange={setInviteStudentOpen}>
+                <Dialog open={inviteStudentOpen} onOpenChange={(o) => {
+                  setInviteStudentOpen(o);
+                  if (!o) { setInviteEmail(''); setInvitePreview(null); }
+                }}>
                   <DialogTrigger asChild>
                     <Button size="sm"><UserPlus className="h-4 w-4 mr-1" />Invite Student</Button>
                   </DialogTrigger>
                   <DialogContent>
-                    <DialogHeader><DialogTitle>Invite a Student</DialogTitle></DialogHeader>
-                    <div className="space-y-2">
-                      <Label>Student Email</Label>
-                      <Input placeholder="student@example.com" value={inviteEmail}
-                             onChange={(e) => setInviteEmail(e.target.value)} />
-                    </div>
-                    <DialogFooter>
-                      <Button onClick={handleInviteStudent} disabled={inviting}>
-                        {inviting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                        Send Invite
-                      </Button>
-                    </DialogFooter>
+                    <DialogHeader>
+                      <DialogTitle>{invitePreview ? 'Confirm Invite' : 'Invite a Student'}</DialogTitle>
+                    </DialogHeader>
+
+                    {/* Step 1 — email input */}
+                    {!invitePreview ? (
+                        <div className="space-y-3">
+                          <div className="space-y-1.5">
+                            <Label>Student Email</Label>
+                            <Input
+                                placeholder="student@example.com"
+                                value={inviteEmail}
+                                onChange={(e) => setInviteEmail(e.target.value)}
+                                onKeyDown={(e) => { if (e.key === 'Enter') fetchStudentPreview(); }}
+                            />
+                          </div>
+                          <DialogFooter>
+                            <Button onClick={fetchStudentPreview} disabled={inviting || !inviteEmail.trim()}>
+                              {inviting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                              Find Student
+                            </Button>
+                          </DialogFooter>
+                        </div>
+                    ) : (
+                        /* Step 2 — profile preview + confirm */
+                        <div className="space-y-4">
+                          <div className="flex items-center gap-4 p-4 border rounded-xl bg-muted/30">
+                            <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                            <span className="text-lg font-bold text-primary">
+                              {invitePreview.name?.slice(0, 2).toUpperCase()}
+                            </span>
+                            </div>
+                            <div className="min-w-0">
+                              <p className="font-semibold">{invitePreview.name}</p>
+                              <p className="text-sm text-muted-foreground">{invitePreview.email}</p>
+                              {invitePreview.skills && (
+                                  <p className="text-xs text-muted-foreground mt-0.5 truncate">
+                                    Skills: {invitePreview.skills}
+                                  </p>
+                              )}
+                              {invitePreview.gpa && (
+                                  <p className="text-xs text-muted-foreground">GPA: {invitePreview.gpa}</p>
+                              )}
+                            </div>
+                          </div>
+                          <p className="text-sm text-muted-foreground">
+                            Send a team invitation to <strong>{invitePreview.name}</strong>?
+                          </p>
+                          <DialogFooter className="gap-2">
+                            <Button variant="outline" onClick={() => setInvitePreview(null)}>
+                              ← Back
+                            </Button>
+                            <Button onClick={handleInviteStudent} disabled={inviting}>
+                              {inviting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                              Send Invite
+                            </Button>
+                          </DialogFooter>
+                        </div>
+                    )}
                   </DialogContent>
                 </Dialog>
 
                 {/* Invite Advisor */}
                 {!hasSupervisor && (
-                    <Dialog open={inviteAdvisorOpen} onOpenChange={setInviteAdvisorOpen}>
+                    <Dialog open={inviteAdvisorOpen} onOpenChange={(o) => {
+                      setInviteAdvisorOpen(o);
+                      if (!o) { setAdvisorEmail(''); setAdvisorPreview(null); }
+                    }}>
                       <DialogTrigger asChild>
                         <Button size="sm" variant="outline">
                           <UserPlus className="h-4 w-4 mr-1" />Invite Advisor
                         </Button>
                       </DialogTrigger>
                       <DialogContent>
-                        <DialogHeader><DialogTitle>Invite an Advisor / Supervisor</DialogTitle></DialogHeader>
-                        <div className="space-y-2">
-                          <Label>Advisor Email</Label>
-                          <Input placeholder="advisor@university.edu" value={advisorEmail}
-                                 onChange={(e) => setAdvisorEmail(e.target.value)} />
-                        </div>
-                        <DialogFooter>
-                          <Button onClick={handleInviteAdvisor} disabled={invitingAdvisor}>
-                            {invitingAdvisor && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                            Send Invite
-                          </Button>
-                        </DialogFooter>
+                        <DialogHeader>
+                          <DialogTitle>{advisorPreview ? 'Confirm Invite' : 'Invite an Advisor'}</DialogTitle>
+                        </DialogHeader>
+
+                        {/* Step 1 — email input */}
+                        {!advisorPreview ? (
+                            <div className="space-y-3">
+                              <div className="space-y-1.5">
+                                <Label>Advisor Email</Label>
+                                <Input
+                                    placeholder="advisor@university.edu"
+                                    value={advisorEmail}
+                                    onChange={(e) => setAdvisorEmail(e.target.value)}
+                                    onKeyDown={(e) => { if (e.key === 'Enter') fetchAdvisorPreview(); }}
+                                />
+                              </div>
+                              <DialogFooter>
+                                <Button onClick={fetchAdvisorPreview} disabled={invitingAdvisor || !advisorEmail.trim()}>
+                                  {invitingAdvisor && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                  Find Advisor
+                                </Button>
+                              </DialogFooter>
+                            </div>
+                        ) : (
+                            /* Step 2 — profile preview + confirm */
+                            <div className="space-y-4">
+                              <div className="flex items-center gap-4 p-4 border rounded-xl bg-muted/30">
+                                <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                              <span className="text-lg font-bold text-primary">
+                                {advisorPreview.name?.slice(0, 2).toUpperCase()}
+                              </span>
+                                </div>
+                                <div className="min-w-0">
+                                  <p className="font-semibold">{advisorPreview.name}</p>
+                                  <p className="text-sm text-muted-foreground">{advisorPreview.email}</p>
+                                  {advisorPreview.department && (
+                                      <p className="text-xs text-muted-foreground mt-0.5">
+                                        Dept: {advisorPreview.department}
+                                      </p>
+                                  )}
+                                  {advisorPreview.researchAreas && (
+                                      <p className="text-xs text-muted-foreground truncate">
+                                        Research: {advisorPreview.researchAreas}
+                                      </p>
+                                  )}
+                                </div>
+                              </div>
+                              <p className="text-sm text-muted-foreground">
+                                Send an advisor invitation to <strong>{advisorPreview.name}</strong>?
+                              </p>
+                              <DialogFooter className="gap-2">
+                                <Button variant="outline" onClick={() => setAdvisorPreview(null)}>
+                                  ← Back
+                                </Button>
+                                <Button onClick={handleInviteAdvisor} disabled={invitingAdvisor}>
+                                  {invitingAdvisor && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                  Send Invite
+                                </Button>
+                              </DialogFooter>
+                            </div>
+                        )}
                       </DialogContent>
                     </Dialog>
                 )}
@@ -358,6 +532,223 @@ export default function TeamWorkspacePage() {
                   </CardContent>
                 </Card>
             )}
+            {/* ── Leave Team button ── */}
+            <Card className="border-destructive/30">
+              <CardContent className="p-4 flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-destructive">Leave Team</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    {isLeader && (team?.members ?? []).filter((m: any) => m.userId !== user?.id).length > 0
+                        ? 'You must transfer leadership to another member before leaving.'
+                        : 'You will lose access to this team and its data.'}
+                  </p>
+                </div>
+                <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={() => {
+                      if (!isLeader) { setLeaveOpen(true); return; }
+                      // Leader: only go to transfer flow if other members exist
+                      const otherMembers = (team?.members ?? []).filter((m: any) => m.userId !== user?.id);
+                      if (otherMembers.length === 0) {
+                        setLeaveOpen(true); // sole member — simple leave
+                      } else {
+                        setTransferOpen(true);
+                      }
+                    }}
+                >
+                  Leave Team
+                </Button>
+              </CardContent>
+            </Card>
+
+            {/* ── Report 5: Project timeline — vertical card layout ── */}
+            {(() => {
+              const createdAt = (team as any).createdAt;
+              if (!createdAt) return null;
+
+              const fmt = (d: Date | string | null | undefined) => {
+                if (!d) return '—';
+                const date = typeof d === 'string' ? new Date(d) : d;
+                if (isNaN(date.getTime())) return '—';
+                return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+              };
+
+              const teamCreatedDate = new Date(createdAt);
+
+              interface TLEvent {
+                icon: string;
+                label: string;
+                sub?: string;
+                dateLabel: string;
+                dotColor: string;
+                tag?: string;
+                tagColor?: string;
+              }
+
+              const events: TLEvent[] = [];
+
+              // 1 — Team formed
+              events.push({
+                icon: '👥',
+                label: 'Team Formed',
+                sub: `Led by ${(team as any).leaderName ?? 'Unknown'}`,
+                dateLabel: fmt(teamCreatedDate),
+                dotColor: '#a855f7',
+                tag: 'Done',
+                tagColor: '#a855f7',
+              });
+
+              // 2 — Advisor assigned
+              if (advisor) {
+                events.push({
+                  icon: '🎓',
+                  label: 'Advisor Assigned',
+                  sub: advisor.name + (advisor.department ? ` · ${advisor.department}` : ''),
+                  dateLabel: fmt(teamCreatedDate), // no exact timestamp stored
+                  dotColor: '#3b82f6',
+                  tag: 'Done',
+                  tagColor: '#3b82f6',
+                });
+              }
+
+              // 3 — Deliverable events (one row per submission / resubmission / approval)
+              const STATUS_ICON: Record<string, string> = {
+                PENDING:           '📋',
+                SUBMITTED:         '📤',
+                APPROVED:          '✅',
+                CHANGES_REQUESTED: '🔄',
+              };
+              const STATUS_COLOR: Record<string, string> = {
+                PENDING:           '#6b7280',
+                SUBMITTED:         '#3b82f6',
+                APPROVED:          '#22c55e',
+                CHANGES_REQUESTED: '#f59e0b',
+              };
+              const STATUS_TAG: Record<string, string> = {
+                PENDING:           'Pending',
+                SUBMITTED:         'Submitted',
+                APPROVED:          'Approved',
+                CHANGES_REQUESTED: 'Changes Needed',
+              };
+
+              // Sort deliverables by deadline ascending
+              const sortedDelivs = [...timelineDelivs].sort((a, b) => {
+                if (!a.deadline) return 1;
+                if (!b.deadline) return -1;
+                return new Date(a.deadline).getTime() - new Date(b.deadline).getTime();
+              });
+
+              for (const d of sortedDelivs) {
+                const color = STATUS_COLOR[d.status] ?? '#6b7280';
+
+                // Only show deliverables that have actually been acted on
+                // (submitted, resubmitted, approved, or changes requested)
+                // PENDING and unsubmitted deliverables are silently skipped
+
+                if (!d.submittedAt && d.status === 'PENDING') continue;
+
+                // Submission events
+                if (d.submittedAt) {
+                  // Always show the original submission
+                  events.push({
+                    icon: '📤',
+                    label: `Submitted: ${d.title}`,
+                    sub: `Deadline: ${fmt(d.deadline)}`,
+                    dateLabel: fmt(d.submittedAt),
+                    dotColor: '#3b82f6',
+                    tag: 'Submission',
+                    tagColor: '#3b82f6',
+                  });
+
+                  // If a resubmission comment exists, also show the resubmission as a separate event
+                  if (d.resubmissionComment) {
+                    events.push({
+                      icon: '🔁',
+                      label: `Resubmitted: ${d.title}`,
+                      sub: `Note: "${d.resubmissionComment.slice(0, 70)}${d.resubmissionComment.length > 70 ? '…' : ''}"`,
+                      dateLabel: fmt(d.submittedAt),
+                      dotColor: '#f59e0b',
+                      tag: 'Resubmission',
+                      tagColor: '#f59e0b',
+                    });
+                  }
+                }
+
+                // Advisor decision event (Approved or Changes Requested)
+                if (d.status === 'APPROVED' || d.status === 'CHANGES_REQUESTED') {
+                  events.push({
+                    icon: STATUS_ICON[d.status],
+                    label: `${STATUS_TAG[d.status]}: ${d.title}`,
+                    sub: `Deadline was ${fmt(d.deadline)}`,
+                    dateLabel: d.submittedAt ? fmt(d.submittedAt) : fmt(d.deadline),
+                    dotColor: color,
+                    tag: STATUS_TAG[d.status],
+                    tagColor: color,
+                  });
+                }
+              }
+
+              // Final — Today
+              events.push({
+                icon: '📍',
+                label: 'Today',
+                sub: undefined,
+                dateLabel: fmt(new Date()),
+                dotColor: '#f59e0b',
+              });
+
+              return (
+                  <Card>
+                    <CardContent className="p-5">
+                      <p className="text-sm font-semibold mb-5">Project Timeline</p>
+                      <div className="relative">
+                        {/* Vertical connector line */}
+                        <div className="absolute left-[19px] top-3 bottom-3 w-0.5 bg-border" />
+
+                        <div className="space-y-0">
+                          {events.map((ev, i) => (
+                              <div key={i} className="relative flex items-start gap-4 pb-5 last:pb-0">
+
+                                {/* Icon dot */}
+                                <div
+                                    className="relative z-10 flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-base shadow-sm border-2 bg-background"
+                                    style={{ borderColor: ev.dotColor }}
+                                >
+                                  {ev.icon}
+                                </div>
+
+                                {/* Content */}
+                                <div className="flex-1 min-w-0 rounded-lg border bg-muted/20 px-3 py-2.5 mt-0.5">
+                                  <div className="flex items-start justify-between gap-2 flex-wrap">
+                                    <div className="min-w-0">
+                                      <p className="text-sm font-semibold leading-snug">{ev.label}</p>
+                                      {ev.sub && (
+                                          <p className="text-xs text-muted-foreground mt-0.5 leading-snug">{ev.sub}</p>
+                                      )}
+                                    </div>
+                                    <div className="flex items-center gap-2 shrink-0">
+                                      {ev.tag && (
+                                          <span className="text-[10px] px-1.5 py-0.5 rounded-full font-semibold whitespace-nowrap"
+                                                style={{ backgroundColor: ev.tagColor + '22', color: ev.tagColor }}>
+                                      {ev.tag}
+                                    </span>
+                                      )}
+                                      <span className="text-[10px] text-muted-foreground whitespace-nowrap font-medium">
+                                    {ev.dateLabel}
+                                  </span>
+                                    </div>
+                                  </div>
+                                </div>
+
+                              </div>
+                          ))}
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+              );
+            })()}
           </TabsContent>
 
           {/* ── Chat tab ── */}
@@ -385,6 +776,84 @@ export default function TeamWorkspacePage() {
             <DisputesTabContent teamId={Number(id)} isLeader={isLeader} />
           </TabsContent>
         </Tabs>
+
+        {/* ── Member leave confirmation ── */}
+        <Dialog open={leaveOpen} onOpenChange={setLeaveOpen}>
+          <DialogContent className="sm:max-w-sm">
+            <DialogHeader><DialogTitle>Leave Team?</DialogTitle></DialogHeader>
+            <p className="text-sm text-muted-foreground">
+              Are you sure you want to leave <strong>{team?.teamName}</strong>?
+              You will lose access to the team and all its data.
+            </p>
+            <DialogFooter className="gap-2">
+              <Button variant="outline" onClick={() => setLeaveOpen(false)}>Cancel</Button>
+              <Button variant="destructive" onClick={handleLeaveTeam} disabled={leavingTeam}>
+                {leavingTeam && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Yes, Leave Team
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* ── Leader: choose new leader ── */}
+        <Dialog open={transferOpen} onOpenChange={(o) => { setTransferOpen(o); if (!o) setSelectedNewLeader(''); }}>
+          <DialogContent className="sm:max-w-sm">
+            <DialogHeader><DialogTitle>Transfer Leadership</DialogTitle></DialogHeader>
+            <p className="text-sm text-muted-foreground">
+              Select a member to become the new leader of <strong>{team?.teamName}</strong>.
+              You will be removed from the team after transferring.
+            </p>
+            <div className="space-y-2">
+              <Label>New Leader</Label>
+              <Select value={selectedNewLeader} onValueChange={setSelectedNewLeader}>
+                <SelectTrigger><SelectValue placeholder="Select a member..." /></SelectTrigger>
+                <SelectContent>
+                  {(team?.members ?? [])
+                      .filter((m: any) => m.userId !== user?.id)
+                      .map((m: any) => (
+                          <SelectItem key={m.userId} value={String(m.userId)}>
+                            {m.userName}
+                          </SelectItem>
+                      ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <DialogFooter className="gap-2">
+              <Button variant="outline" onClick={() => setTransferOpen(false)}>Cancel</Button>
+              <Button
+                  variant="destructive"
+                  disabled={!selectedNewLeader}
+                  onClick={() => { setTransferOpen(false); setConfirmTransferOpen(true); }}
+              >
+                Continue
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* ── Leader: final confirmation ── */}
+        <Dialog open={confirmTransferOpen} onOpenChange={setConfirmTransferOpen}>
+          <DialogContent className="sm:max-w-sm">
+            <DialogHeader><DialogTitle>Confirm Transfer & Leave</DialogTitle></DialogHeader>
+            <p className="text-sm text-muted-foreground">
+              You are about to make{' '}
+              <strong>
+                {team?.members?.find((m: any) => String(m.userId) === selectedNewLeader)?.userName ?? 'selected member'}
+              </strong>{' '}
+              the new leader of <strong>{team?.teamName}</strong> and leave the team.
+              This cannot be undone.
+            </p>
+            <DialogFooter className="gap-2">
+              <Button variant="outline" onClick={() => { setConfirmTransferOpen(false); setTransferOpen(true); }}>
+                ← Back
+              </Button>
+              <Button variant="destructive" onClick={handleTransferAndLeave} disabled={leavingTeam}>
+                {leavingTeam && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Confirm & Leave
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         {/* Edit project dialog */}
         <Dialog open={editProjectOpen} onOpenChange={setEditProjectOpen}>
@@ -528,16 +997,158 @@ function DeliverableProgressTab({
 
   return (
       <div className="space-y-4">
-        {/* Overall progress bar */}
+        {/* ── Circular overall progress ── */}
         <Card>
-          <CardContent className="p-4 space-y-2">
-            <div className="flex items-center justify-between">
-              <p className="text-sm font-medium">Overall Project Progress</p>
-              <span className="text-sm font-bold">{Math.round(overallPct)}%</span>
+          <CardContent className="p-6">
+            <div className="flex items-center gap-6">
+              {/* Ring */}
+              <div className="relative shrink-0">
+                <svg width="120" height="120" viewBox="0 0 128 128">
+                  <circle cx="64" cy="64" r="54" fill="none" stroke="currentColor"
+                          strokeWidth="10" className="text-muted/30" />
+                  <circle cx="64" cy="64" r="54" fill="none"
+                          stroke={overallPct >= 100 ? "#22c55e" : "#a855f7"}
+                          strokeWidth="10" strokeLinecap="round"
+                          strokeDasharray={2 * Math.PI * 54}
+                          strokeDashoffset={2 * Math.PI * 54 - (overallPct / 100) * 2 * Math.PI * 54}
+                          transform="rotate(-90 64 64)"
+                          style={{ transition: "stroke-dashoffset 0.8s ease" }}
+                  />
+                </svg>
+                <div className="absolute inset-0 flex flex-col items-center justify-center">
+                  <span className="text-2xl font-bold" style={{ color: overallPct >= 100 ? "#22c55e" : "#a855f7" }}>
+                    {Math.round(overallPct)}%
+                  </span>
+                  <span className="text-[10px] text-muted-foreground">done</span>
+                </div>
+              </div>
+              <div>
+                <p className="font-semibold text-sm">Overall Project Progress</p>
+                {overallPct >= 100 && <p className="text-sm text-green-600 dark:text-green-400 mt-1">🎉 All done!</p>}
+              </div>
             </div>
-            <Progress value={overallPct} />
           </CardContent>
         </Card>
+
+        {/* ── Checkpoints-per-member vertical bar chart ── */}
+        {(() => {
+          // Build lookup: assignedToName → { total, done }
+          const allCps = Object.values(phasesMap).flat().flatMap((ph: any) => ph.checkpoints ?? []);
+          const cpMap = new Map<string, { total: number; done: number }>();
+          for (const cp of allCps) {
+            const name = cp.assignedToName ?? 'Unassigned';
+            const e = cpMap.get(name) ?? { total: 0, done: 0 };
+            e.total += 1;
+            if (cp.status === 'COMPLETE') e.done += 1;
+            cpMap.set(name, e);
+          }
+
+          // ALL members always shown (zero if no checkpoints assigned)
+          const data = members.map((m: any) => {
+            const e = cpMap.get(m.userName) ?? { total: 0, done: 0 };
+            return { name: m.userName as string, total: e.total, done: e.done };
+          });
+          // Also include 'Unassigned' bucket if it exists
+          if (cpMap.has('Unassigned')) {
+            const e = cpMap.get('Unassigned')!;
+            data.push({ name: 'Unassigned', total: e.total, done: e.done });
+          }
+
+          // Chart dimensions — compact
+          const CHART_W    = 420;
+          const CHART_H    = 140;
+          const PAD_LEFT   = 28;
+          const PAD_BOTTOM = 36;
+          const PAD_TOP    = 20;
+          const PAD_RIGHT  = 8;
+          const plotW = CHART_W - PAD_LEFT - PAD_RIGHT;
+          const plotH = CHART_H - PAD_TOP - PAD_BOTTOM;
+          const maxVal = Math.max(...data.map(d => d.total), 1);
+
+          // Y-axis ticks — at most 4 nice integer steps
+          const step = Math.ceil(maxVal / 4) || 1;
+          const yTicks: number[] = [];
+          for (let v = 0; v <= maxVal; v += step) yTicks.push(v);
+          if (yTicks[yTicks.length - 1] < maxVal) yTicks.push(yTicks[yTicks.length - 1] + step);
+          const yMax = yTicks[yTicks.length - 1];
+
+          const barW    = Math.min(40, (plotW / data.length) * 0.5);
+          const colW    = plotW / data.length;
+
+          const yPos = (val: number) => PAD_TOP + plotH - (val / yMax) * plotH;
+
+          return (
+              <Card>
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <p className="text-sm font-semibold">Checkpoints by Member</p>
+                    <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                      <span className="flex items-center gap-1"><span className="inline-block w-2.5 h-2.5 rounded-sm" style={{backgroundColor:'#a855f7'}}/> Done</span>
+                      <span className="flex items-center gap-1"><span className="inline-block w-2.5 h-2.5 rounded-sm bg-muted"/> Total</span>
+                    </div>
+                  </div>
+                  <svg width={CHART_W} height={CHART_H} viewBox={`0 0 ${CHART_W} ${CHART_H}`} className="overflow-visible max-w-full">
+                    {/* Subtle horizontal gridlines only */}
+                    {yTicks.map((v) => {
+                      const y = yPos(v);
+                      return (
+                          <g key={v}>
+                            <line x1={PAD_LEFT} y1={y} x2={PAD_LEFT + plotW} y2={y}
+                                  stroke="currentColor" strokeOpacity="0.08" strokeWidth="1" strokeDasharray="3 3" />
+                            <text x={PAD_LEFT - 5} y={y + 3.5} textAnchor="end" fontSize="9"
+                                  fill="#888" style={{fontFamily:'inherit'}}>{v}</text>
+                          </g>
+                      );
+                    })}
+                    {/* Baseline only */}
+                    <line x1={PAD_LEFT} y1={PAD_TOP + plotH} x2={PAD_LEFT + plotW} y2={PAD_TOP + plotH}
+                          stroke="currentColor" strokeOpacity="0.2" strokeWidth="1"/>
+                    {/* Bars */}
+                    {data.map((d, i) => {
+                      const cx     = PAD_LEFT + i * colW + colW / 2;
+                      const totalH = (d.total / yMax) * plotH;
+                      const doneH  = (d.done  / yMax) * plotH;
+                      const totalY = yPos(d.total);
+                      const doneY  = yPos(d.done);
+                      const label  = d.name.length > 9 ? d.name.slice(0, 8) + '…' : d.name;
+                      return (
+                          <g key={d.name}>
+                            {/* Total bar — rounded pill, subtle */}
+                            <rect x={cx - barW/2} y={d.total > 0 ? totalY : PAD_TOP + plotH}
+                                  width={barW} height={d.total > 0 ? totalH : 0}
+                                  rx="5" fill="currentColor" fillOpacity="0.12"/>
+                            {/* Done bar — purple gradient feel */}
+                            {d.done > 0 && (
+                                <rect x={cx - barW/2} y={doneY} width={barW} height={doneH}
+                                      rx="5" fill="url(#purpleGrad)"
+                                      style={{transition:'height 0.7s cubic-bezier(.4,0,.2,1)'}}/>
+                            )}
+                            {/* Count badge above bar */}
+                            <text x={cx} y={(d.total > 0 ? totalY : PAD_TOP + plotH) - 5}
+                                  textAnchor="middle" fontSize="9.5" fontWeight="600"
+                                  fill={d.total > 0 ? '#a855f7' : '#888'}
+                                  style={{fontFamily:'inherit'}}>
+                              {d.total > 0 ? `${d.done}/${d.total}` : '0'}
+                            </text>
+                            {/* Member name */}
+                            <text x={cx} y={PAD_TOP + plotH + 13}
+                                  textAnchor="middle" fontSize="10.5"
+                                  fill="currentColor" style={{fontFamily:'inherit'}}>{label}</text>
+                          </g>
+                      );
+                    })}
+                    {/* Purple gradient def */}
+                    <defs>
+                      <linearGradient id="purpleGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#c084fc"/>
+                        <stop offset="100%" stopColor="#7e22ce"/>
+                      </linearGradient>
+                    </defs>
+                  </svg>
+                </CardContent>
+              </Card>
+          );
+        })()}
 
         {deliverables.length === 0 && (
             <div className="flex flex-col items-center gap-2 py-10 text-muted-foreground">
@@ -597,6 +1208,10 @@ function DeliverableProgressBox({
 
   const isApproved = deliverable.status === 'APPROVED';
   const locked     = isApproved || !isActive;
+
+  // Compute checkpoint counts for inline progress bars
+  const delivDone  = phases.flatMap((p: any) => p.checkpoints ?? []).filter((c: any) => c.status === 'COMPLETE').length;
+  const delivTotal = phases.flatMap((p: any) => p.checkpoints ?? []).length;
 
   const addPhase = async () => {
     if (!phaseForm.name.trim()) { toast.error('Phase name required'); return; }
@@ -659,6 +1274,19 @@ function DeliverableProgressBox({
             )}
           </div>
         </div>
+        {/* Deliverable inline progress bar */}
+        {delivTotal > 0 && (
+            <div className="px-4 py-2 border-b border-muted/30">
+              <div className="flex justify-between text-[10px] text-muted-foreground mb-1">
+                <span>{delivDone}/{delivTotal} checkpoints</span>
+                <span>{Math.round((delivDone / delivTotal) * 100)}%</span>
+              </div>
+              <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+                <div className="h-full rounded-full transition-all duration-700"
+                     style={{ width: `${Math.round((delivDone / delivTotal) * 100)}%`, backgroundColor: isApproved ? '#22c55e' : '#a855f7' }} />
+              </div>
+            </div>
+        )}
 
         {/* Phases & Checkpoints inside this deliverable */}
         <div className={`p-4 space-y-3 ${locked ? 'pointer-events-none select-none' : ''}`}>
@@ -683,6 +1311,24 @@ function DeliverableProgressBox({
                     onStatusChange={onRefresh}
                     readOnly={locked}
                 />
+                {/* Phase inline progress bar */}
+                {(() => {
+                  const pd = (phase.checkpoints ?? []).filter((c: any) => c.status === 'COMPLETE').length;
+                  const pt = (phase.checkpoints ?? []).length;
+                  if (pt === 0) return null;
+                  return (
+                      <div className="px-1 pb-1">
+                        <div className="flex justify-between text-[10px] text-muted-foreground mb-0.5">
+                          <span>{pd}/{pt} checkpoints</span>
+                          <span>{Math.round((pd / pt) * 100)}%</span>
+                        </div>
+                        <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+                          <div className="h-full rounded-full transition-all duration-700"
+                               style={{ width: `${Math.round((pd / pt) * 100)}%`, backgroundColor: pd === pt ? '#22c55e' : '#a855f7' }} />
+                        </div>
+                      </div>
+                  );
+                })()}
                 {isLeader && !locked && (
                     <Dialog open={addCpOpen === phase.id} onOpenChange={(o) => setAddCpOpen(o ? phase.id : null)}>
                       <DialogTrigger asChild>

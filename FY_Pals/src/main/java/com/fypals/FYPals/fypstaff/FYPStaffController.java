@@ -29,13 +29,17 @@ public class FYPStaffController {
     @GetMapping("/advisors")
     public ResponseEntity<?> getAllAdvisors() {
         List<User> advisors = userRepository.findByRole(Role.ADVISOR);
-        List<Map<String, Object>> result = advisors.stream().map(a -> Map.<String, Object>of(
-                "id",              a.getId(),
-                "name",            a.getName(),
-                "email",           a.getEmail(),
-                "bio",             a.getBio() != null ? a.getBio() : "",
-                "profileComplete", a.isProfileComplete()
-        )).collect(Collectors.toList());
+        List<Map<String, Object>> result = advisors.stream().map(a -> {
+            int teamCount = projectRepository.findBySupervisorId(a.getId()).size();
+            return Map.<String, Object>of(
+                    "id",              a.getId(),
+                    "name",            a.getName(),
+                    "email",           a.getEmail(),
+                    "bio",             a.getBio() != null ? a.getBio() : "",
+                    "profileComplete", a.isProfileComplete(),
+                    "teamCount",       teamCount
+            );
+        }).collect(Collectors.toList());
         return ResponseEntity.ok(result);
     }
 

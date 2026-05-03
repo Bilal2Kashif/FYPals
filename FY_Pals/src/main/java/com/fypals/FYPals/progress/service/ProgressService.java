@@ -70,7 +70,7 @@ public class ProgressService {
         return cp;
     }
 
-    private void recalculateProjectCompletion(Long projectId) {
+    public void recalculateProjectCompletion(Long projectId) {
         List<Phase> phases = phaseRepository.findByProjectId(projectId);
         long total = 0, completed = 0;
         for (Phase p : phases) {

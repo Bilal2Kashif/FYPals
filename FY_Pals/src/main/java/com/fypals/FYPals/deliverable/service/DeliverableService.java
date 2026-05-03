@@ -5,14 +5,20 @@ import com.fypals.FYPals.deliverable.entity.Feedback;
 import com.fypals.FYPals.deliverable.repository.DeliverableRepository;
 import com.fypals.FYPals.deliverable.repository.FeedbackRepository;
 import com.fypals.FYPals.notification.service.NotificationService;
+import com.fypals.FYPals.progress.entity.Phase;
 import com.fypals.FYPals.progress.entity.Project;
+import com.fypals.FYPals.progress.repository.CheckpointRepository;
+import com.fypals.FYPals.progress.repository.PhaseRepository;
 import com.fypals.FYPals.progress.repository.ProjectRepository;
+import com.fypals.FYPals.progress.service.ProgressService;
 import com.fypals.FYPals.team.repository.TeamMemberRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.List;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -23,6 +29,9 @@ public class DeliverableService {
     private final ProjectRepository      projectRepository;
     private final NotificationService    notificationService;
     private final TeamMemberRepository   teamMemberRepository;
+    private final PhaseRepository        phaseRepository;
+    private final CheckpointRepository   checkpointRepository;
+    private final ProgressService        progressService;
 
     public Deliverable createDeliverable(Long projectId, String title, String deadline) {
         if (title == null || title.trim().isEmpty()) {
@@ -50,15 +59,6 @@ public class DeliverableService {
 
     /**
      * Submit or RESUBMIT a deliverable.
-     *
-     * Feature 12: FYP deliverable submission/resubmission.
-     *
-     * Allows submission when status is:
-     * - PENDING (first submission)
-     * - CHANGES_REQUESTED (resubmission after advisor requested changes)
-     *
-     * Deadline check: only blocks if deadline is strictly before today
-     * (i.e. the deadline day itself is still valid for submission).
      */
     public Deliverable submit(Long deliverableId, String driveLink, String resubmissionComment) {
         if (driveLink == null || driveLink.trim().isEmpty()) {
@@ -68,12 +68,10 @@ public class DeliverableService {
         Deliverable d = deliverableRepository.findById(deliverableId)
                 .orElseThrow(() -> new RuntimeException("Deliverable not found: " + deliverableId));
 
-        // Only PENDING and CHANGES_REQUESTED allow (re)submission
         if (!"PENDING".equals(d.getStatus()) && !"CHANGES_REQUESTED".equals(d.getStatus())) {
             throw new RuntimeException("This deliverable cannot be submitted. Current status: " + d.getStatus());
         }
 
-        // Deadline check: block only if deadline was yesterday or earlier
         if (d.getDeadline() != null && LocalDate.now().isAfter(d.getDeadline())) {
             throw new RuntimeException("Submission deadline has passed. Deadline was: " + d.getDeadline());
         }
@@ -88,12 +86,10 @@ public class DeliverableService {
         }
         Deliverable saved = deliverableRepository.save(d);
 
-        // Notify advisor of resubmission
         if (d.getProject() != null && d.getProject().getSupervisorId() != null) {
-            String msg = "Team submitted deliverable: '" + d.getTitle() + "'";
             notificationService.sendNotification(
                     d.getProject().getSupervisorId(),
-                    msg,
+                    "Team submitted deliverable: '" + d.getTitle() + "'",
                     "DELIVERABLE_SUBMITTED",
                     deliverableId
             );
@@ -104,9 +100,10 @@ public class DeliverableService {
 
     /**
      * Give feedback on a deliverable.
-     * ADVISOR: must provide a decision (APPROVED or CHANGES_REQUESTED). If CHANGES_REQUESTED,
-     *          deliverable status resets so team can resubmit.
-     * FYP_STAFF: leaves a comment only, no decision, no status change.
+     * ADVISOR: must provide a decision (APPROVED or CHANGES_REQUESTED).
+     *   When APPROVED: automatically marks all checkpoints belonging to this
+     *   deliverable's phases as COMPLETE and recalculates project completion.
+     * FYP_STAFF: leaves a comment only — no decision, no status change.
      */
     public Feedback giveFeedback(Long deliverableId, String comment,
                                  String decision, String callerRole) {
@@ -131,6 +128,51 @@ public class DeliverableService {
             fb.setDecision(decision);
             d.setStatus(decision);
             deliverableRepository.save(d);
+
+            // ── Auto-complete all checkpoints when deliverable is APPROVED ──────────
+            // Phases belong to a deliverable by date range:
+            // a phase belongs to this deliverable if its endDate <= this deliverable's
+            // deadline AND endDate > the previous deliverable's deadline (or no previous).
+            // Deliverables are sorted by deadline ascending to find the boundary.
+            if ("APPROVED".equals(decision) && d.getProject() != null) {
+                Long projectId = d.getProject().getId();
+
+                // All deliverables for this project sorted by deadline ascending
+                List<Deliverable> allDeliverables = deliverableRepository
+                        .findByProjectId(projectId)
+                        .stream()
+                        .filter(del -> del.getDeadline() != null)
+                        .sorted(java.util.Comparator.comparing(Deliverable::getDeadline))
+                        .collect(Collectors.toList());
+
+                // Lower bound: the deadline of the deliverable immediately before this one
+                LocalDate lowerBound = null;
+                for (Deliverable del : allDeliverables) {
+                    if (del.getId().equals(d.getId())) break;
+                    lowerBound = del.getDeadline();
+                }
+                final LocalDate startBound = lowerBound;
+
+                // Mark every checkpoint of matching phases COMPLETE
+                List<Phase> phases = phaseRepository.findByProjectId(projectId);
+                for (Phase phase : phases) {
+                    boolean belongs =
+                            phase.getEndDate() != null
+                                    && !phase.getEndDate().isAfter(d.getDeadline())
+                                    && (startBound == null || phase.getEndDate().isAfter(startBound));
+                    if (belongs) {
+                        checkpointRepository.findByPhaseId(phase.getId()).forEach(cp -> {
+                            if (!"COMPLETE".equals(cp.getStatus())) {
+                                cp.setStatus("COMPLETE");
+                                checkpointRepository.save(cp);
+                            }
+                        });
+                    }
+                }
+
+                // Recalculate overall project completion percentage
+                progressService.recalculateProjectCompletion(projectId);
+            }
         }
         // FYP_STAFF: no decision, no status change
 

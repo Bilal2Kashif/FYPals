@@ -10,6 +10,7 @@ import com.fypals.FYPals.content.repository.VoteRepository;
 import com.fypals.FYPals.deliverable.repository.DeliverableRepository;
 import com.fypals.FYPals.dispute.repository.DisputeRepository;
 import com.fypals.FYPals.enums.Role;
+import com.fypals.FYPals.enums.VoteType;
 import com.fypals.FYPals.notification.repository.NotificationRepository;
 import com.fypals.FYPals.progress.repository.ProjectRepository;
 import com.fypals.FYPals.team.entity.Team;
@@ -27,6 +28,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import org.springframework.mail.SimpleMailMessage;
+import org.springframework.mail.javamail.JavaMailSender;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -43,6 +48,7 @@ public class AdminService {
     private final DeliverableRepository deliverableRepository;
     private final DisputeRepository    disputeRepository;
     private final PasswordEncoder      passwordEncoder;
+    private final JavaMailSender       mailSender;
 
     // ── Read ──────────────────────────────────────────────────────────────────
 
@@ -89,6 +95,19 @@ public class AdminService {
         // Admins are always profile-complete; others must fill their profiles
         user.setProfileComplete(role == Role.ADMIN);
 
+        userRepository.save(user);
+    }
+
+    // ── Change password ───────────────────────────────────────────────────────
+
+    @Transactional
+    public void changePassword(Long id, String newPassword) {
+        if (newPassword == null || newPassword.trim().length() < 6) {
+            throw new IllegalArgumentException("Password must be at least 6 characters");
+        }
+        User user = userRepository.findById(id)
+                .orElseThrow(() -> new EntityNotFoundException("User not found: " + id));
+        user.setPassword(passwordEncoder.encode(newPassword.trim()));
         userRepository.save(user);
     }
 
@@ -176,13 +195,119 @@ public class AdminService {
                 .build();
     }
 
+    // ── Team detail (full members list) ──────────────────────────────────────
+
+    @Transactional(readOnly = true)
+    public Map<String, Object> getTeamDetail(Long teamId) {
+        Team team = teamRepository.findById(teamId)
+                .orElseThrow(() -> new EntityNotFoundException("Team not found: " + teamId));
+
+        List<Map<String, Object>> members = team.getMembers().stream()
+                .filter(m -> m.getDropDate() == null)
+                .map(m -> {
+                    Map<String, Object> memberMap = new java.util.LinkedHashMap<>();
+                    memberMap.put("userId",     m.getUser().getId());
+                    memberMap.put("userName",   m.getUser().getName());
+                    memberMap.put("email",      m.getUser().getEmail());
+                    memberMap.put("role",       m.getUser().getRole());
+                    memberMap.put("memberRole", m.getMemberRole());
+                    return memberMap;
+                }).collect(Collectors.toList());
+
+        String advisorName = projectRepository.findByTeamId(teamId)
+                .map(proj -> proj.getSupervisorId())
+                .filter(sid -> sid != null)
+                .flatMap(sid -> userRepository.findById(sid))
+                .map(User::getName).orElse(null);
+
+        Map<String, Object> result = new java.util.LinkedHashMap<>();
+        result.put("id",          team.getId());
+        result.put("teamName",    team.getTeamName());
+        result.put("status",      team.getStatus());
+        result.put("leaderId",    team.getLeader().getId());
+        result.put("leaderName",  team.getLeader().getName());
+        result.put("advisorName", advisorName);
+        result.put("createdAt",   team.getCreatedAt());
+        result.put("members",     members);
+        return result;
+    }
+
+    // ── Add member to team ────────────────────────────────────────────────────
+
+    @Transactional
+    public void addMemberToTeam(Long teamId, Long userId) {
+        Team team = teamRepository.findById(teamId)
+                .orElseThrow(() -> new EntityNotFoundException("Team not found: " + teamId));
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new EntityNotFoundException("User not found: " + userId));
+
+        // Check not already an active member
+        boolean alreadyMember = team.getMembers().stream()
+                .anyMatch(m -> m.getUser().getId().equals(userId) && m.getDropDate() == null);
+        if (alreadyMember) throw new RuntimeException("User is already a member of this team");
+
+        TeamMember member = TeamMember.builder()
+                .team(team)
+                .user(user)
+                .memberRole(com.fypals.FYPals.enums.MemberRole.MEMBER)
+                .build();
+        teamMemberRepository.save(member);
+    }
+
+    // ── Remove member from team ───────────────────────────────────────────────
+
+    @Transactional
+    public void removeMemberFromTeam(Long teamId, Long userId) {
+        Team team = teamRepository.findById(teamId)
+                .orElseThrow(() -> new EntityNotFoundException("Team not found: " + teamId));
+
+        if (team.getLeader().getId().equals(userId)) {
+            throw new RuntimeException("Cannot remove the team leader. Transfer leadership first.");
+        }
+
+        TeamMember member = teamMemberRepository.findByTeamIdAndUserId(teamId, userId)
+                .orElseThrow(() -> new RuntimeException("User is not a member of this team"));
+        teamMemberRepository.delete(member);
+    }
+
+    // ── Send email to a user ─────────────────────────────────────────────────
+
+    public void sendEmailToUser(String to, String subject, String message) {
+        if (to == null || to.trim().isEmpty()) {
+            throw new IllegalArgumentException("Recipient email is required");
+        }
+        if (subject == null || subject.trim().isEmpty()) {
+            throw new IllegalArgumentException("Subject is required");
+        }
+        if (message == null || message.trim().isEmpty()) {
+            throw new IllegalArgumentException("Message body is required");
+        }
+
+        SimpleMailMessage mail = new SimpleMailMessage();
+        mail.setTo(to.trim());
+        mail.setSubject(subject.trim());
+        mail.setText(message.trim());
+        mailSender.send(mail);
+    }
+
     private AdminTeamDTO toAdminTeamDTO(Team team) {
         int memberCount = teamMemberRepository.countByTeamId(team.getId());
+
+        // Resolve advisor name via ProjectRepository (Team has no direct project FK)
+        // findByTeamId returns empty Optional if team has no project yet — safe.
+        String advisorName = projectRepository.findByTeamId(team.getId())
+                .map(proj -> proj.getSupervisorId())
+                .filter(sid -> sid != null)
+                .flatMap(sid -> userRepository.findById(sid))
+                .map(User::getName)
+                .orElse(null);
+
         return AdminTeamDTO.builder()
                 .id(team.getId())
                 .teamName(team.getTeamName())
                 .leaderName(team.getLeader().getName())
                 .leaderId(team.getLeader().getId())
+                .advisorName(advisorName)
                 .status(team.getStatus())
                 .memberCount(memberCount)
                 .createdAt(team.getCreatedAt())
@@ -194,6 +319,8 @@ public class AdminService {
         String authorName = userRepository.findById(post.getAuthorId())
                 .map(u -> u.getName())
                 .orElse("Unknown");
+        int upvotes   = voteRepository.countByPostIdAndVoteType(post.getId(), VoteType.UPVOTE);
+        int downvotes = voteRepository.countByPostIdAndVoteType(post.getId(), VoteType.DOWNVOTE);
         return AdminPostDTO.builder()
                 .id(post.getId())
                 .title(post.getTitle())
@@ -202,6 +329,8 @@ public class AdminService {
                 .authorId(post.getAuthorId())
                 .authorName(authorName)
                 .voteCount(post.getVoteCount())
+                .upvoteCount(upvotes)
+                .downvoteCount(downvotes)
                 .commentCount(post.getCommentCount())
                 .createdAt(post.getCreatedAt())
                 .build();

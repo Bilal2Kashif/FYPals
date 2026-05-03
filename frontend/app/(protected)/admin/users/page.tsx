@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { toast } from 'sonner';
-import { Trash2, Plus, Loader2 } from 'lucide-react';
+import { Trash2, Plus, Loader2, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -40,11 +40,15 @@ export default function AdminUsersPage() {
   const [page, setPage]       = useState(0);
   const [loading, setLoading] = useState(true);
 
+  // Search + filter (client-side on fetched page)
+  const [search, setSearch]     = useState('');
+  const [roleFilter, setRoleFilter] = useState('ALL');
+
   // Create user form
-  const [createOpen, setCreateOpen]   = useState(false);
-  const [creating, setCreating]       = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [creating, setCreating]     = useState(false);
   const [form, setForm] = useState({ name: '', email: '', password: '', role: 'STUDENT' });
-  const [formError, setFormError]     = useState('');
+  const [formError, setFormError]   = useState('');
 
   const load = useCallback(async (p = 0) => {
     setLoading(true);
@@ -90,11 +94,25 @@ export default function AdminUsersPage() {
     }
   };
 
-  const users = data?.content ?? [];
+  // Client-side filter on the fetched page
+  const allUsers = data?.content ?? [];
+  const users = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return allUsers.filter((u) => {
+      const matchesSearch = !q ||
+          u.name?.toLowerCase().includes(q) ||
+          u.email?.toLowerCase().includes(q);
+      const matchesRole = roleFilter === 'ALL' || u.role === roleFilter;
+      return matchesSearch && matchesRole;
+    });
+  }, [allUsers, search, roleFilter]);
+
   const totalPages = data?.totalPages ?? 1;
 
   return (
       <div className="space-y-4">
+
+        {/* Header */}
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold">Users</h1>
@@ -109,29 +127,15 @@ export default function AdminUsersPage() {
               <div className="space-y-3">
                 <div>
                   <Label>Name *</Label>
-                  <Input
-                      placeholder="Full name"
-                      value={form.name}
-                      onChange={(e) => setForm({ ...form, name: e.target.value })}
-                  />
+                  <Input placeholder="Full name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
                 </div>
                 <div>
                   <Label>Email *</Label>
-                  <Input
-                      type="email"
-                      placeholder="user@example.com"
-                      value={form.email}
-                      onChange={(e) => setForm({ ...form, email: e.target.value })}
-                  />
+                  <Input type="email" placeholder="user@example.com" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
                 </div>
                 <div>
                   <Label>Password *</Label>
-                  <Input
-                      type="password"
-                      placeholder="Min 6 characters"
-                      value={form.password}
-                      onChange={(e) => setForm({ ...form, password: e.target.value })}
-                  />
+                  <Input type="password" placeholder="Min 6 characters" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
                 </div>
                 <div>
                   <Label>Role</Label>
@@ -158,6 +162,32 @@ export default function AdminUsersPage() {
           </Dialog>
         </div>
 
+        {/* Search + filter bar */}
+        <div className="flex items-center gap-3">
+          <div className="relative flex-1 max-w-sm">
+            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground pointer-events-none" />
+            <Input
+                placeholder="Search by name or email…"
+                className="pl-8"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+          <Select value={roleFilter} onValueChange={setRoleFilter}>
+            <SelectTrigger className="w-40">
+              <SelectValue placeholder="All Roles" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="ALL">All Roles</SelectItem>
+              <SelectItem value="STUDENT">Student</SelectItem>
+              <SelectItem value="ADVISOR">Advisor</SelectItem>
+              <SelectItem value="FYP_STAFF">FYP Staff</SelectItem>
+              <SelectItem value="ADMIN">Admin</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        {/* Table */}
         <div className="border rounded-lg overflow-hidden">
           <table className="w-full text-sm">
             <thead className="bg-muted/50">
@@ -215,6 +245,7 @@ export default function AdminUsersPage() {
           </table>
         </div>
 
+        {/* Pagination — unchanged */}
         {totalPages > 1 && (
             <div className="flex items-center justify-center gap-2">
               <Button variant="outline" size="sm" onClick={() => setPage((p) => p - 1)} disabled={page === 0}>

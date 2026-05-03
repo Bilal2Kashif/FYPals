@@ -12,9 +12,11 @@ import api from '@/lib/api';
 import type { Post, PostCategory } from '@/types';
 
 const categoryConfig: Record<PostCategory, { label: string; variant: 'default' | 'info' | 'success' | 'warning' }> = {
-  LOOKING_FOR_MEMBER: { label: 'Looking for Member', variant: 'info' },
-  PROJECT_IDEA: { label: 'Project Idea', variant: 'success' },
-  GENERAL: { label: 'General', variant: 'default' },
+  LOOKING_FOR_MEMBER:  { label: 'Looking for Member', variant: 'info' },
+  PROJECT_IDEA:        { label: 'Project',             variant: 'success' },
+  GENERAL:             { label: 'General',             variant: 'default' },
+  REQUIREMENT:         { label: 'Requirement',         variant: 'warning' },
+  LOOKING_FOR_ADVISOR: { label: 'Looking for Advisor', variant: 'info' },
 };
 
 interface PostCardProps {
