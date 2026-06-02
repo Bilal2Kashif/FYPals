@@ -43,6 +43,9 @@ public class User {
 
     private LocalDateTime createdAt;
 
+    // Set when admin changes role — used to invalidate tokens issued before this time
+    private LocalDateTime roleChangedAt;
+
     // Keep a basic toString for logging — avoids circular reference from @Data
     @Override
     public String toString() {

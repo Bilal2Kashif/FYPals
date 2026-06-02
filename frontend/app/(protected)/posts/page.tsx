@@ -42,6 +42,7 @@ export default function PostsPage() {
   const [dialogOpen, setDialogOpen]     = useState(false);
   const [categoryFilter, setCategoryFilter] = useState<CategoryValue | 'ALL'>('ALL');
   const [sortMode, setSortMode]         = useState<SortMode>('date');
+  const [search, setSearch]             = useState('');
   const [page, setPage]                 = useState(0);
   const [totalPages, setTotalPages]     = useState(1);
   const [selectedCategory, setSelectedCategory] = useState<CategoryValue>('GENERAL');
@@ -138,7 +139,15 @@ export default function PostsPage() {
               </Button>
           ))}
         </div>
-
+        <div className="relative">
+          <input
+              type="text"
+              placeholder="Search by author name..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          />
+        </div>
         {sortMode === 'votes' && (
             <p className="text-xs text-muted-foreground italic">
               📊 Showing posts ranked by community votes
@@ -157,7 +166,9 @@ export default function PostsPage() {
             </div>
         ) : (
             <div className="space-y-3">
-              {posts.map((post, idx) => (
+              {posts.filter((post: any) =>
+                  !search.trim() || post.authorName?.toLowerCase().includes(search.trim().toLowerCase())
+              ).map((post, idx) => (
                   <div key={post.id} className="relative">
                     {sortMode === 'votes' && idx < 3 && (
                         <span className="absolute -left-5 top-3 text-sm font-bold text-muted-foreground select-none">

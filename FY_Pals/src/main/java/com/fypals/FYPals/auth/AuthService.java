@@ -102,6 +102,18 @@ public class AuthService {
         }
         User user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new RuntimeException("User not found"));
+
+        // Reject refresh if token was issued before password/role change
+        java.util.Date issuedAt = jwtUtil.extractIssuedAt(oldToken);
+        if (issuedAt != null && user.getRoleChangedAt() != null) {
+            java.time.Instant tokenInstant = issuedAt.toInstant();
+            java.time.Instant changedInstant = user.getRoleChangedAt()
+                    .atZone(java.time.ZoneId.systemDefault()).toInstant();
+            if (tokenInstant.isBefore(changedInstant)) {
+                throw new RuntimeException("Token invalidated — please log in again");
+            }
+        }
+
         String newToken = jwtUtil.generateToken(user.getEmail(), user.getRole().name());
         return new AuthResponse(user.getId(), user.getName(), newToken,
                 user.getEmail(), user.getRole().name());

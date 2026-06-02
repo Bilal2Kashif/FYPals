@@ -48,6 +48,9 @@ public class TeamService {
         if (teamName == null || teamName.trim().isEmpty()) {
             throw new IllegalArgumentException("Team name cannot be empty");
         }
+        if (teamRepository.existsByTeamName(teamName.trim())) {
+            throw new RuntimeException("A team with this name already exists");
+        }
 
         Team team = Team.builder()
                 .teamName(teamName.trim())

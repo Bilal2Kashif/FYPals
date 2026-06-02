@@ -26,12 +26,8 @@ public class Phase {
 
     private LocalDate endDate;
 
-    /**
-     * Which deliverable this phase belongs to.
-     * Stored when the phase is created so grouping is permanent
-     * and never changes regardless of deliverable status changes.
-     * Hibernate ddl-auto=update creates this column automatically.
-     */
+    // Links this phase permanently to a specific deliverable.
+    // Null for phases created before this field was added (treated as belonging to active deliverable).
     @Column(name = "deliverable_id")
     private Long deliverableId;
 }

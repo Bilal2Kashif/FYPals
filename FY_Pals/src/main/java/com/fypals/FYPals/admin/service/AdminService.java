@@ -8,10 +8,13 @@ import com.fypals.FYPals.content.repository.CommentRepository;
 import com.fypals.FYPals.content.repository.PostRepository;
 import com.fypals.FYPals.content.repository.VoteRepository;
 import com.fypals.FYPals.deliverable.repository.DeliverableRepository;
+import com.fypals.FYPals.deliverable.repository.FeedbackRepository;
 import com.fypals.FYPals.dispute.repository.DisputeRepository;
 import com.fypals.FYPals.enums.Role;
 import com.fypals.FYPals.enums.VoteType;
 import com.fypals.FYPals.notification.repository.NotificationRepository;
+import com.fypals.FYPals.progress.repository.CheckpointRepository;
+import com.fypals.FYPals.progress.repository.PhaseRepository;
 import com.fypals.FYPals.progress.repository.ProjectRepository;
 import com.fypals.FYPals.team.entity.Team;
 import com.fypals.FYPals.team.entity.TeamMember;
@@ -45,7 +48,10 @@ public class AdminService {
     private final VoteRepository       voteRepository;
     private final NotificationRepository notificationRepository;
     private final ProjectRepository    projectRepository;
+    private final PhaseRepository      phaseRepository;
+    private final CheckpointRepository checkpointRepository;
     private final DeliverableRepository deliverableRepository;
+    private final FeedbackRepository    feedbackRepository;
     private final DisputeRepository    disputeRepository;
     private final PasswordEncoder      passwordEncoder;
     private final JavaMailSender       mailSender;
@@ -108,6 +114,8 @@ public class AdminService {
         User user = userRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("User not found: " + id));
         user.setPassword(passwordEncoder.encode(newPassword.trim()));
+        // Stamp roleChangedAt to invalidate existing JWT tokens for this user
+        user.setRoleChangedAt(java.time.LocalDateTime.now());
         userRepository.save(user);
     }
 
@@ -127,6 +135,8 @@ public class AdminService {
         if (newRole == Role.ADMIN) {
             oldUser.setProfileComplete(true);
         }
+        // Stamp roleChangedAt so any existing JWT issued before this is rejected
+        oldUser.setRoleChangedAt(java.time.LocalDateTime.now());
         userRepository.save(oldUser);
     }
 
@@ -143,11 +153,37 @@ public class AdminService {
 
         List<Team> ledTeams = teamRepository.findByLeaderId(id);
         for (Team team : ledTeams) {
-            deleteTeamInternal(team.getId());
+            // Find another active member to transfer leadership to
+            List<TeamMember> otherMembers = teamMemberRepository.findByTeamId(team.getId())
+                    .stream()
+                    .filter(m -> m.getDropDate() == null && !m.getUser().getId().equals(id))
+                    .collect(java.util.stream.Collectors.toList());
+
+            if (otherMembers.isEmpty()) {
+                // No other members — delete the team
+                deleteTeamInternal(team.getId());
+            } else {
+                // Transfer leadership to the first available member
+                User newLeader = otherMembers.get(0).getUser();
+                team.setLeader(newLeader);
+                teamRepository.save(team);
+            }
         }
 
         List<TeamMember> memberships = teamMemberRepository.findByUserId(id);
         teamMemberRepository.deleteAll(memberships);
+
+        // Clear supervisorId on any projects this user supervised (Bug 5)
+        projectRepository.findBySupervisorId(id).forEach(project -> {
+            project.setSupervisorId(null);
+            projectRepository.save(project);
+        });
+        // Null out checkpoint assignments for this user before deleting
+        checkpointRepository.findByAssignedToId(id).forEach(cp -> {
+            cp.setAssignedTo(null);
+            checkpointRepository.save(cp);
+        });
+
 
         List<Post> userPosts = postRepository.findByAuthorId(id);
         for (Post post : userPosts) {
@@ -173,6 +209,18 @@ public class AdminService {
     private void deleteTeamInternal(Long teamId) {
         disputeRepository.deleteByTeamId(teamId);
         projectRepository.findByTeamId(teamId).ifPresent(project -> {
+            // Delete checkpoints → phases → deliverables → project (FK order)
+            List<com.fypals.FYPals.progress.entity.Phase> phases =
+                    phaseRepository.findByProjectId(project.getId());
+            for (com.fypals.FYPals.progress.entity.Phase phase : phases) {
+                checkpointRepository.deleteAll(
+                        checkpointRepository.findByPhaseId(phase.getId()));
+            }
+            phaseRepository.deleteAll(phases);
+            // Delete feedback for each deliverable before deleting deliverables (FK constraint)
+            deliverableRepository.findByProjectId(project.getId()).forEach(d ->
+                    feedbackRepository.deleteAll(feedbackRepository.findByDeliverableId(d.getId()))
+            );
             deliverableRepository.deleteByProjectId(project.getId());
             projectRepository.delete(project);
         });
@@ -193,6 +241,18 @@ public class AdminService {
                 .bio(user.getBio())
                 .createdAt(user.getCreatedAt())
                 .build();
+    }
+
+    // ── Delete post ──────────────────────────────────────────────────────────
+
+    @Transactional
+    public void deletePost(Long postId) {
+        if (!postRepository.existsById(postId)) {
+            throw new EntityNotFoundException("Post not found: " + postId);
+        }
+        voteRepository.deleteByPostId(postId);
+        commentRepository.deleteByPostId(postId);
+        postRepository.deleteById(postId);
     }
 
     // ── Team detail (full members list) ──────────────────────────────────────
@@ -241,10 +301,16 @@ public class AdminService {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new EntityNotFoundException("User not found: " + userId));
 
-        // Check not already an active member
+        // Check not already an active member of THIS team
         boolean alreadyMember = team.getMembers().stream()
                 .anyMatch(m -> m.getUser().getId().equals(userId) && m.getDropDate() == null);
         if (alreadyMember) throw new RuntimeException("User is already a member of this team");
+
+        // Block if user is already an active member of ANY other team (Bug 8)
+        boolean inAnotherTeam = teamMemberRepository.findByUserId(userId).stream()
+                .anyMatch(m -> m.getDropDate() == null && !m.getTeam().getId().equals(teamId));
+        if (inAnotherTeam) throw new RuntimeException(
+                "User is already a member of another team. Remove them first.");
 
         TeamMember member = TeamMember.builder()
                 .team(team)

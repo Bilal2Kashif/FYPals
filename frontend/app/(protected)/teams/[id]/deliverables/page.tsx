@@ -57,6 +57,8 @@ export default function DeliverablesPage() {
 
   const submit = async (id: number, isResubmission = false) => {
     if (!driveLink.trim()) { toast.error('Please enter a Google Drive link'); return; }
+    const isDriveLink = driveLink.trim().match(/^https:\/\/(drive|docs)\.google\.com\/.+/);
+    if (!isDriveLink) { toast.error('Please enter a valid Google Drive link (must start with https://drive.google.com or https://docs.google.com)'); return; }
     setSubmitting(true);
     try {
       const payload: any = { googleDriveLink: driveLink };

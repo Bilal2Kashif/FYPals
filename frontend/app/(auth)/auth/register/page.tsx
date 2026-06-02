@@ -7,7 +7,7 @@ import { z } from 'zod';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { toast } from 'sonner';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Eye, EyeOff } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -17,10 +17,14 @@ import api from '@/lib/api';
 import { useAuthStore } from '@/store/authStore';
 
 const schema = z.object({
-  name:     z.string().min(2, 'Name must be at least 2 characters'),
-  email:    z.string().email('Invalid email'),
-  password: z.string().min(6, 'Password must be at least 6 characters'),
-  role:     z.enum(['STUDENT', 'ADVISOR']),
+  name: z.string().min(2, 'Name must be at least 2 characters').regex(/^[^0-9]*$/, 'Name cannot contain numbers'),
+  email:           z.string().email('Invalid email'),
+  password:        z.string().min(6, 'Password must be at least 6 characters'),
+  confirmPassword: z.string().min(1, 'Please confirm your password'),
+  role:            z.enum(['STUDENT', 'ADVISOR']),
+}).refine((data) => data.password === data.confirmPassword, {
+  message: 'Passwords do not match',
+  path: ['confirmPassword'],
 });
 
 type FormValues = z.infer<typeof schema>;
@@ -38,6 +42,8 @@ export default function RegisterPage() {
   const router = useRouter();
   const { login } = useAuthStore();
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [role, setRole] = useState<'STUDENT' | 'ADVISOR'>('STUDENT');
 
   const {
@@ -90,7 +96,8 @@ export default function RegisterPage() {
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
             <div className="space-y-1">
               <Label htmlFor="name">Full Name</Label>
-              <Input id="name" placeholder="Ahmad Ali" {...register('name')} />
+              <Input id="name" placeholder="Ahmad Ali" {...register('name')}
+              onKeyDown={(e) => { if (/[0-9]/.test(e.key)) e.preventDefault(); }} />
               {errors.name && <p className="text-xs text-destructive">{errors.name.message}</p>}
             </div>
             <div className="space-y-1">
@@ -100,9 +107,25 @@ export default function RegisterPage() {
             </div>
             <div className="space-y-1">
               <Label htmlFor="password">Password</Label>
-              <Input id="password" type="password" placeholder="Min 6 characters" {...register('password')} />
+              <div className="relative">
+                <Input id="password" type={showPassword ? 'text' : 'password'} placeholder="Min 6 characters" {...register('password')} />
+                <button type="button" onClick={() => setShowPassword(p => !p)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
               {errors.password && <p className="text-xs text-destructive">{errors.password.message}</p>}
             </div>
+            <div className="space-y-1">
+              <Label htmlFor="confirmPassword">Confirm Password</Label>
+              <div className="relative">
+                <Input id="confirmPassword" type={showConfirmPassword ? 'text' : 'password'} placeholder="Repeat your password" {...register('confirmPassword')} />
+                <button type="button" onClick={() => setShowConfirmPassword(p => !p)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                  {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+              {errors.confirmPassword && <p className="text-xs text-destructive">{errors.confirmPassword.message}</p>}
+            </div>
+
             <div className="space-y-1">
               <Label>Role</Label>
               <Select

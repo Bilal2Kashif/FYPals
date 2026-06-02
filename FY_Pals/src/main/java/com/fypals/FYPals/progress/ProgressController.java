@@ -31,6 +31,7 @@ public class ProgressController {
     private final CheckpointRepository  checkpointRepository;
     private final UserRepository        userRepository;
     private final DeliverableRepository deliverableRepository;
+    private final com.fypals.FYPals.notification.repository.NotificationRepository notificationRepository;
 
     @GetMapping("/projects/{projectId}/progress")
     @Transactional
@@ -121,7 +122,12 @@ public class ProgressController {
         }
         LocalDate startDate = LocalDate.parse(body.get("startDate"));
         LocalDate endDate   = LocalDate.parse(body.get("endDate"));
-
+        if (startDate.isBefore(LocalDate.now())) {
+            throw new IllegalArgumentException("Start date cannot be in the past");
+        }
+        if (endDate.isBefore(LocalDate.now())) {
+            throw new IllegalArgumentException("End date cannot be in the past");
+        }
         if (!startDate.isBefore(endDate)) {
             throw new IllegalArgumentException("Phase start date must be before end date");
         }
@@ -195,23 +201,38 @@ public class ProgressController {
         cp.setTitle(title.trim());
         cp.setStatus("TODO");
 
-        if (body.get("deadline") != null && !body.get("deadline").isEmpty()) {
-            LocalDate cpDeadline = LocalDate.parse(body.get("deadline"));
-            // Validate checkpoint deadline is within the phase's date range
-            if (phase.getStartDate() != null && cpDeadline.isBefore(phase.getStartDate())) {
-                throw new IllegalArgumentException(
-                        "Checkpoint deadline (" + cpDeadline + ") cannot be before the phase start date ("
-                                + phase.getStartDate() + ")");
-            }
-            if (phase.getEndDate() != null && cpDeadline.isAfter(phase.getEndDate())) {
-                throw new IllegalArgumentException(
-                        "Checkpoint deadline (" + cpDeadline + ") cannot be after the phase end date ("
-                                + phase.getEndDate() + ")");
-            }
-            cp.setDeadline(cpDeadline);
+        if (body.get("deadline") == null || body.get("deadline").isEmpty()) {
+            throw new IllegalArgumentException("Checkpoint deadline is required");
         }
+        LocalDate cpDeadline = LocalDate.parse(body.get("deadline"));
+        if (cpDeadline.isBefore(LocalDate.now())) {
+            throw new IllegalArgumentException("Checkpoint deadline cannot be in the past");
+        }
+// Validate checkpoint deadline is within the phase's date range
+        if (phase.getStartDate() != null && cpDeadline.isBefore(phase.getStartDate())) {
+            throw new IllegalArgumentException(
+                    "Checkpoint deadline (" + cpDeadline + ") cannot be before the phase start date ("
+                            + phase.getStartDate() + ")");
+        }
+        if (phase.getEndDate() != null && cpDeadline.isAfter(phase.getEndDate())) {
+            throw new IllegalArgumentException(
+                    "Checkpoint deadline (" + cpDeadline + ") cannot be after the phase end date ("
+                            + phase.getEndDate() + ")");
+        }
+        cp.setDeadline(cpDeadline);
         if (body.get("assignedToId") != null && !body.get("assignedToId").isEmpty()) {
-            userRepository.findById(Long.valueOf(body.get("assignedToId"))).ifPresent(cp::setAssignedTo);
+            userRepository.findById(Long.valueOf(body.get("assignedToId"))).ifPresent(assignee -> {
+                cp.setAssignedTo(assignee);
+                com.fypals.FYPals.notification.entity.Notification notif =
+                        new com.fypals.FYPals.notification.entity.Notification();
+                notif.setUserId(assignee.getId());
+                notif.setType("REMINDER");
+                notif.setMessage("You have been assigned a checkpoint: \"" + title.trim() + "\"");
+                notif.setReferenceId(phase.getProject().getTeam().getId());
+                notif.setRead(false);
+                notif.setCreatedAt(java.time.LocalDateTime.now());
+                notificationRepository.save(notif);
+            });
         }
 
         Checkpoint saved = checkpointRepository.save(cp);
@@ -238,8 +259,11 @@ public class ProgressController {
     public ResponseEntity<?> updateStatus(
             @PathVariable Long checkpointId,
             @RequestParam String status,
-            @RequestParam String callerRole) {
-        Checkpoint cp = progressService.updateCheckpointStatus(checkpointId, status, callerRole);
+            @RequestParam String callerRole,
+            @AuthenticationPrincipal UserDetails userDetails) {
+        Long callerId = userRepository.findByEmail(userDetails.getUsername())
+                .orElseThrow(() -> new RuntimeException("User not found")).getId();
+        Checkpoint cp = progressService.updateCheckpointStatus(checkpointId, status, callerRole, callerId);
         return ResponseEntity.ok(toCheckpointMap(cp, cp.getPhase().getId()));
     }
 
@@ -252,6 +276,18 @@ public class ProgressController {
                 .orElseThrow(() -> new RuntimeException("User not found"));
         cp.setAssignedTo(assignee);
         checkpointRepository.save(cp);
+
+        // Notify the assigned user
+        com.fypals.FYPals.notification.entity.Notification notif =
+                new com.fypals.FYPals.notification.entity.Notification();
+        notif.setUserId(assignee.getId());
+        notif.setType("REMINDER");
+        notif.setMessage("You have been assigned a checkpoint: \"" + cp.getTitle() + "\"");
+        notif.setReferenceId(cp.getPhase().getProject().getTeam().getId());
+        notif.setRead(false);
+        notif.setCreatedAt(java.time.LocalDateTime.now());
+        notificationRepository.save(notif);
+
         return ResponseEntity.ok(toCheckpointMap(cp, cp.getPhase().getId()));
     }
 
@@ -265,5 +301,42 @@ public class ProgressController {
         m.put("assignedToId",   c.getAssignedTo() != null ? c.getAssignedTo().getId()   : null);
         m.put("assignedToName", c.getAssignedTo() != null ? c.getAssignedTo().getName() : null);
         return m;
+    }
+    @PostMapping("/projects/{projectId}/fix-phase-deliverable-ids")
+    @Transactional
+    public ResponseEntity<?> fixPhaseDeliverableIds(@PathVariable Long projectId) {
+        // Get all deliverables for this project sorted by deadline asc
+        List<com.fypals.FYPals.deliverable.entity.Deliverable> deliverables =
+                deliverableRepository.findByProjectId(projectId)
+                        .stream()
+                        .sorted(java.util.Comparator.comparing(d -> d.getDeadline()))
+                        .toList();
+
+        // Get only phases with null deliverableId, sorted by id asc (creation order)
+        List<Phase> phases = phaseRepository.findByProjectId(projectId)
+                .stream()
+                .filter(p -> p.getDeliverableId() == null)
+                .sorted(java.util.Comparator.comparing(Phase::getId))
+                .toList();
+
+        if (deliverables.isEmpty() || phases.isEmpty()) {
+            return ResponseEntity.ok(Map.of("fixed", 0, "message", "Nothing to fix"));
+        }
+
+        int total = phases.size();
+        int delivCount = deliverables.size();
+        int perDeliv = total / delivCount;
+        int remainder = total % delivCount;
+        int idx = 0;
+
+        for (int i = 0; i < delivCount && idx < total; i++) {
+            int count = perDeliv + (i < remainder ? 1 : 0);
+            for (int j = 0; j < count && idx < total; j++, idx++) {
+                phases.get(idx).setDeliverableId(deliverables.get(i).getId());
+                phaseRepository.save(phases.get(idx));
+            }
+        }
+
+        return ResponseEntity.ok(Map.of("fixed", total));
     }
 }

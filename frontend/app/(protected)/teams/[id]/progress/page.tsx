@@ -41,19 +41,30 @@ interface EnrichedPhase extends Phase { checkpoints: any[]; deliverableId?: numb
 interface DeliverableGroup { deliverable: Deliverable; phases: EnrichedPhase[]; }
 
 function groupPhasesByDeliverable(phases: EnrichedPhase[], deliverables: Deliverable[]): DeliverableGroup[] {
+  // Sort by deadline asc, then by id asc as stable tiebreaker
   const sorted = [...deliverables].sort((a, b) => {
     const t = (d: Deliverable) => Array.isArray(d.deadline)
         ? new Date((d.deadline as number[])[0], (d.deadline as number[])[1] - 1, (d.deadline as number[])[2]).getTime()
         : new Date(d.deadline).getTime();
-    return t(a) - t(b);
+    const diff = t(a) - t(b);
+    return diff !== 0 ? diff : a.id - b.id; // stable: lower id = created first
   });
+
   const groups = new Map<number, EnrichedPhase[]>();
   sorted.forEach(d => groups.set(d.id, []));
-  const activeDeliverable = sorted.find(d => d.status !== 'APPROVED') ?? sorted[sorted.length - 1];
+
+  // Phases with a valid deliverableId go to their linked deliverable.
+  // Phases with null deliverableId (legacy data before Phase.java fix) go to the
+  // FIRST (oldest) deliverable, since that is when they were originally created.
+  const firstDeliverable = sorted[0] ?? null;
+
   for (const phase of phases) {
     const did = phase.deliverableId;
-    if (did != null && groups.has(did)) groups.get(did)!.push(phase);
-    else if (activeDeliverable) groups.get(activeDeliverable.id)!.push(phase);
+    if (did != null && groups.has(did)) {
+      groups.get(did)!.push(phase);
+    } else if (firstDeliverable) {
+      groups.get(firstDeliverable.id)!.push(phase);
+    }
   }
   return sorted.map(d => ({ deliverable: d, phases: groups.get(d.id) ?? [] }));
 }
@@ -222,7 +233,7 @@ export default function ProgressPage() {
   const [groups, setGroups]     = useState<DeliverableGroup[]>([]);
   const [loading, setLoading]   = useState(true);
 
-  const [addPhaseOpen, setAddPhaseOpen] = useState(false);
+  const [addPhaseOpen, setAddPhaseOpen] = useState<number | false>(false);
   const [addCpOpen, setAddCpOpen]       = useState<number | null>(null);
   const [phaseForm, setPhaseForm]       = useState({ name: '', startDate: '', endDate: '' });
   const [cpForm, setCpForm]             = useState({ title: '', deadline: '' });
@@ -267,11 +278,10 @@ export default function ProgressPage() {
   const callerRole = isLeader ? 'LEADER' : 'MEMBER';
   const activeDeliverable = groups.find(g => g.deliverable.status !== 'APPROVED')?.deliverable ?? null;
 
-  const addPhase = async () => {
-    if (!activeDeliverable) { toast.error('No active deliverable'); return; }
+  const addPhase = async (deliverableId: number, deliverableTitle: string) => {
     setSaving(true);
     try {
-      await api.post(`/projects/${projectId}/phases`, { ...phaseForm, deliverableId: String(activeDeliverable.id) });
+      await api.post(`/projects/${projectId}/phases`, { ...phaseForm, deliverableId: String(deliverableId) });
       toast.success('Phase added');
       setAddPhaseOpen(false);
       setPhaseForm({ name: '', startDate: '', endDate: '' });
@@ -331,24 +341,7 @@ export default function ProgressPage() {
             <h1 className="text-xl font-bold">Project Progress</h1>
           </div>
 
-          {isLeader && activeDeliverable && (
-              <Dialog open={addPhaseOpen} onOpenChange={setAddPhaseOpen}>
-                <DialogTrigger asChild><Button size="sm">+ Add Phase</Button></DialogTrigger>
-                <DialogContent>
-                  <DialogHeader><DialogTitle>Add Phase — "{activeDeliverable.title}"</DialogTitle></DialogHeader>
-                  <div className="space-y-3">
-                    <div><Label>Phase Name</Label><Input value={phaseForm.name} onChange={(e) => setPhaseForm({ ...phaseForm, name: e.target.value })} /></div>
-                    <div><Label>Start Date</Label><Input type="date" value={phaseForm.startDate} onChange={(e) => setPhaseForm({ ...phaseForm, startDate: e.target.value })} /></div>
-                    <div><Label>End Date</Label><Input type="date" value={phaseForm.endDate} onChange={(e) => setPhaseForm({ ...phaseForm, endDate: e.target.value })} /></div>
-                  </div>
-                  <DialogFooter>
-                    <Button onClick={addPhase} disabled={saving}>
-                      {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Add Phase
-                    </Button>
-                  </DialogFooter>
-                </DialogContent>
-              </Dialog>
-          )}
+
         </div>
 
         {/* ── Report 1: Circular overall progress ── */}
@@ -406,7 +399,7 @@ export default function ProgressPage() {
                 <div className="p-4 space-y-3">
                   {phases.length === 0 && (
                       <p className="text-sm text-muted-foreground italic">
-                        {isApproved ? 'No phases were added for this deliverable.' : 'No phases yet. Click "+ Add Phase" above to add one.'}
+                        {isApproved ? 'No phases were added for this deliverable.' : 'No phases yet. Add a phase below.'}
                       </p>
                   )}
 
@@ -463,6 +456,30 @@ export default function ProgressPage() {
                         </div>
                     );
                   })}
+                  {/* Add Phase button — shown for every non-approved deliverable */}
+                  {isLeader && !isApproved && (
+                      <Dialog open={addPhaseOpen === d.id} onOpenChange={(o) => {
+                        setAddPhaseOpen(o ? d.id : false);
+                        if (!o) setPhaseForm({ name: '', startDate: '', endDate: '' });
+                      }}>
+                        <DialogTrigger asChild>
+                          <Button size="sm" variant="outline" className="w-full mt-1">+ Add Phase</Button>
+                        </DialogTrigger>
+                        <DialogContent>
+                          <DialogHeader><DialogTitle>Add Phase — "{d.title}"</DialogTitle></DialogHeader>
+                          <div className="space-y-3">
+                            <div><Label>Phase Name</Label><Input value={phaseForm.name} onChange={(e) => setPhaseForm({ ...phaseForm, name: e.target.value })} /></div>
+                            <div><Label>Start Date</Label><Input type="date" value={phaseForm.startDate} onChange={(e) => setPhaseForm({ ...phaseForm, startDate: e.target.value })} /></div>
+                            <div><Label>End Date</Label><Input type="date" value={phaseForm.endDate} onChange={(e) => setPhaseForm({ ...phaseForm, endDate: e.target.value })} /></div>
+                          </div>
+                          <DialogFooter>
+                            <Button onClick={() => addPhase(d.id, d.title)} disabled={saving}>
+                              {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Add Phase
+                            </Button>
+                          </DialogFooter>
+                        </DialogContent>
+                      </Dialog>
+                  )}
                 </div>
               </div>
           );

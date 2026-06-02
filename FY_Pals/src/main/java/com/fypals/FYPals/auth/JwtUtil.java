@@ -62,6 +62,15 @@ public class JwtUtil {
         }
     }
 
+    /** Extracts the issuedAt date from a valid token. Returns null if invalid. */
+    public java.util.Date extractIssuedAt(String token) {
+        try {
+            return getClaims(token).getIssuedAt();
+        } catch (JwtException | IllegalArgumentException e) {
+            return null;
+        }
+    }
+
     public boolean isTokenValid(String token) {
         try {
             getClaims(token);

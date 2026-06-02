@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { toast } from 'sonner';;
-import { Loader2, CheckCircle, AlertCircle, Plus, X, Lock } from 'lucide-react';
+import { Loader2, CheckCircle, AlertCircle, Plus, X, Lock, Eye, EyeOff } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -170,6 +170,7 @@ export default function ProfilePage() {
   const [pwForm, setPwForm]     = useState({ oldPassword: '', newPassword: '', confirmPassword: '' });
   const [pwError, setPwError]   = useState('');
   const [savingPw, setSavingPw] = useState(false);
+  const [showPwFields, setShowPwFields] = useState({ old: false, new: false, confirm: false });
 
   const load = async () => {
     try {
@@ -311,7 +312,9 @@ export default function ProfilePage() {
                         {/* Name */}
                         <div>
                           <Label>Name <span className="text-destructive">*</span></Label>
-                          <Input value={name} onChange={(e) => setName(e.target.value)} />
+                          <Input value={name}
+                                 onChange={(e) => setName(e.target.value)}
+                                 onKeyDown={(e) => { if (/[0-9]/.test(e.key)) e.preventDefault(); }} />
                         </div>
 
                         {/* Bio */}
@@ -338,7 +341,12 @@ export default function ProfilePage() {
                                     type="number" step="0.01" min="0" max="4"
                                     value={gpa}
                                     placeholder="e.g. 3.5"
-                                    onChange={(e) => setGpa(e.target.value)}
+                                    onChange={(e) => {
+                                      const val = e.target.value;
+                                      if (val === '' || (parseFloat(val) >= 0 && parseFloat(val) <= 4)) {
+                                        setGpa(val);
+                                      }
+                                    }}
                                 />
                               </div>
                               <ChipInput
@@ -521,21 +529,30 @@ export default function ProfilePage() {
                       <div className="space-y-3">
                         <div>
                           <Label>Current Password</Label>
-                          <Input type="password" placeholder="Enter current password"
-                                 value={pwForm.oldPassword}
-                                 onChange={(e) => { setPwForm({ ...pwForm, oldPassword: e.target.value }); setPwError(''); }} />
+                          <div className="relative">
+                            <Input type={showPwFields.old ? 'text' : 'password'} placeholder="Enter current password" value={pwForm.oldPassword} onChange={(e) => { setPwForm({ ...pwForm, oldPassword: e.target.value }); setPwError(''); }} />
+                            <button type="button" onClick={() => setShowPwFields(s => ({ ...s, old: !s.old }))} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                              {showPwFields.old ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                            </button>
+                          </div>
                         </div>
                         <div>
                           <Label>New Password</Label>
-                          <Input type="password" placeholder="Min 6 characters"
-                                 value={pwForm.newPassword}
-                                 onChange={(e) => { setPwForm({ ...pwForm, newPassword: e.target.value }); setPwError(''); }} />
+                          <div className="relative">
+                            <Input type={showPwFields.new ? 'text' : 'password'} placeholder="Min 6 characters" value={pwForm.newPassword} onChange={(e) => { setPwForm({ ...pwForm, newPassword: e.target.value }); setPwError(''); }} />
+                            <button type="button" onClick={() => setShowPwFields(s => ({ ...s, new: !s.new }))} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                              {showPwFields.new ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                            </button>
+                          </div>
                         </div>
                         <div>
                           <Label>Confirm New Password</Label>
-                          <Input type="password" placeholder="Repeat new password"
-                                 value={pwForm.confirmPassword}
-                                 onChange={(e) => { setPwForm({ ...pwForm, confirmPassword: e.target.value }); setPwError(''); }} />
+                          <div className="relative">
+                            <Input type={showPwFields.confirm ? 'text' : 'password'} placeholder="Repeat new password" value={pwForm.confirmPassword} onChange={(e) => { setPwForm({ ...pwForm, confirmPassword: e.target.value }); setPwError(''); }} />
+                            <button type="button" onClick={() => setShowPwFields(s => ({ ...s, confirm: !s.confirm }))} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                              {showPwFields.confirm ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                            </button>
+                          </div>
                         </div>
                         {pwError && <p className="text-sm text-destructive">{pwError}</p>}
                       </div>

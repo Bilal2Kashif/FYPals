@@ -16,4 +16,6 @@ public interface TeamRepository extends JpaRepository<Team, Long> {
 
     @Query("SELECT t FROM Team t WHERE t.leader.id = :leaderId")
     List<Team> findByLeaderId(@Param("leaderId") Long leaderId);
+
+    boolean existsByTeamName(String teamName);
 }

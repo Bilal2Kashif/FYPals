@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { toast } from 'sonner';
-import { Trash2, Plus, Loader2, Search, Shield, KeyRound } from 'lucide-react';
+import { Trash2, Plus, Loader2, Search, Shield, KeyRound, Eye, EyeOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -59,6 +59,8 @@ export default function AdminUsersPage() {
   const [newPassword, setNewPassword]     = useState('');
   const [pwError, setPwError]             = useState('');
   const [changingPw, setChangingPw]       = useState(false);
+  const [showCreatePw, setShowCreatePw] = useState(false);
+  const [showAdminPw, setShowAdminPw]   = useState(false);
 
   const load = useCallback(async (p = 0) => {
     setLoading(true);
@@ -86,7 +88,10 @@ export default function AdminUsersPage() {
   const createUser = async () => {
     if (!form.name.trim()) { setFormError('Name is required'); return; }
     if (!form.email.trim()) { setFormError('Email is required'); return; }
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(form.email.trim())) { setFormError('Please enter a valid email address'); return; }
     if (!form.password.trim()) { setFormError('Password is required'); return; }
+    if (form.password.trim().length < 6) { setFormError('Password must be at least 6 characters'); return; }
     setFormError('');
     setCreating(true);
     try {
@@ -162,9 +167,16 @@ export default function AdminUsersPage() {
             <DialogContent>
               <DialogHeader><DialogTitle>Create New User</DialogTitle></DialogHeader>
               <div className="space-y-3">
-                <div><Label>Name *</Label><Input placeholder="Full name" value={form.name} onChange={e => setForm({...form, name: e.target.value})} /></div>
+                <div><Label>Name *</Label><Input placeholder="Full name" value={form.name} onChange={e => setForm({...form, name: e.target.value})} onKeyDown={e => { if (/[0-9]/.test(e.key)) e.preventDefault(); }} /></div>
                 <div><Label>Email *</Label><Input type="email" placeholder="user@example.com" value={form.email} onChange={e => setForm({...form, email: e.target.value})} /></div>
-                <div><Label>Password *</Label><Input type="password" placeholder="Min 6 characters" value={form.password} onChange={e => setForm({...form, password: e.target.value})} /></div>
+                <div><Label>Password *</Label>
+                  <div className="relative">
+                    <Input type={showCreatePw ? 'text' : 'password'} placeholder="Min 6 characters" value={form.password} onChange={e => setForm({...form, password: e.target.value})} />
+                    <button type="button" onClick={() => setShowCreatePw(p => !p)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                      {showCreatePw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
+                </div>
                 <div>
                   <Label>Role</Label>
                   <Select value={form.role} onValueChange={v => setForm({...form, role: v})}>
@@ -320,8 +332,12 @@ export default function AdminUsersPage() {
                 <p className="text-sm text-muted-foreground">Set a new password for <strong>{roleUser?.name}</strong>.</p>
                 <div>
                   <Label>New Password</Label>
-                  <Input type="password" placeholder="Min 6 characters" value={newPassword}
-                         onChange={e => { setNewPassword(e.target.value); setPwError(''); }} />
+                  <div className="relative">
+                    <Input type={showAdminPw ? 'text' : 'password'} placeholder="Min 6 characters" value={newPassword} onChange={e => { setNewPassword(e.target.value); setPwError(''); }} />
+                    <button type="button" onClick={() => setShowAdminPw(p => !p)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                      {showAdminPw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
                 </div>
                 {pwError && <p className="text-sm text-destructive">{pwError}</p>}
                 <div className="flex justify-end gap-2 pt-1">

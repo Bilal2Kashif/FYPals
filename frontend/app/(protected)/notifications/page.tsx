@@ -144,7 +144,8 @@ export default function NotificationsPage() {
         const isActionableInvite =
             ACTIONABLE_INVITE_TYPES.has(typeStr) &&
             !n.read &&
-            !actedOn.has(n.id);
+            !actedOn.has(n.id) &&
+            !n.message?.toLowerCase().includes('leader');
 
         const isActingNow = acting?.id === n.id;
 

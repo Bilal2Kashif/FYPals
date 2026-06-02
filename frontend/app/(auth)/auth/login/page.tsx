@@ -7,13 +7,14 @@ import { z } from 'zod';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { toast } from 'sonner';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Eye, EyeOff } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import api from '@/lib/api';
 import { useAuthStore } from '@/store/authStore';
+
 import type { AuthResponse } from '@/types';
 
 const schema = z.object({
@@ -37,6 +38,7 @@ export default function LoginPage() {
   const router = useRouter();
   const { login } = useAuthStore();
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   const {
     register,
@@ -82,7 +84,12 @@ export default function LoginPage() {
             </div>
             <div className="space-y-1">
               <Label htmlFor="password">Password</Label>
-              <Input id="password" type="password" placeholder="••••••••" {...register('password')} />
+              <div className="relative">
+                <Input id="password" type={showPassword ? 'text' : 'password'} placeholder="••••••••" {...register('password')} />
+                <button type="button" onClick={() => setShowPassword(p => !p)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
               {errors.password && <p className="text-xs text-destructive">{errors.password.message}</p>}
             </div>
             <Button type="submit" className="w-full" disabled={loading}>
