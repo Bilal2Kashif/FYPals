@@ -938,46 +938,33 @@ function DeliverableProgressTab({
 
       if (hasDeliverableId) {
         enriched.forEach((ph: any) => {
-          if (ph.deliverableId && newMap[ph.deliverableId]) {
-            newMap[ph.deliverableId].push(ph);
+          const did = ph.deliverableId != null ? Number(ph.deliverableId) : null;
+          if (did != null && newMap[did]) {
+            newMap[did].push(ph);
           } else {
             const active = delivList.find((d: any) => d.status !== 'APPROVED') ?? delivList[delivList.length - 1];
             if (active) newMap[active.id].push(ph);
           }
         });
       } else {
-        // FIX: Distribute phases across deliverables by createdAt order.
-        // Approved deliverables are frozen snapshots — phases created before
-        // deliverable[i] was approved belong to deliverable[i].
-        // Remaining phases go to the current active deliverable.
-        // This prevents phases from disappearing when a deliverable is approved.
         const approvedDelivs = delivList.filter((d: any) => d.status === 'APPROVED');
         const activeDeliverable = delivList.find((d: any) => d.status !== 'APPROVED')
             ?? delivList[delivList.length - 1];
-
-        // Sort phases by id (creation order — IDs are sequential)
         const sortedPhases = [...enriched].sort((a: any, b: any) => a.id - b.id);
-
         if (approvedDelivs.length === 0 || delivList.length === 1) {
-          // No approved deliverables yet — all phases under active
           if (activeDeliverable) newMap[activeDeliverable.id] = sortedPhases;
         } else {
-          // Divide phases evenly across deliverables in order.
-          // Each approved deliverable gets a share; active gets the rest.
           const totalDelivsShown = delivList.length;
           const phasesPerDeliv = Math.floor(sortedPhases.length / totalDelivsShown);
           let phaseIdx = 0;
           delivList.forEach((d: any, i: number) => {
             const isLast = i === delivList.length - 1;
-            const count = isLast
-                ? sortedPhases.length - phaseIdx   // last gets remainder
-                : phasesPerDeliv;
+            const count = isLast ? sortedPhases.length - phaseIdx : phasesPerDeliv;
             newMap[d.id] = sortedPhases.slice(phaseIdx, phaseIdx + count);
             phaseIdx += count;
           });
         }
       }
-
       setPhasesMap(newMap);
     } catch (err: any) {
       toast.error('Failed to load progress');
@@ -1110,7 +1097,7 @@ function DeliverableProgressTab({
                       const doneH  = (d.done  / yMax) * plotH;
                       const totalY = yPos(d.total);
                       const doneY  = yPos(d.done);
-                      const label  = d.name.length > 9 ? d.name.slice(0, 8) + '…' : d.name;
+                      const label  = d.name.length > 12 ? d.name.slice(0, 11) + '…' : d.name;
                       return (
                           <g key={d.name}>
                             {/* Total bar — rounded pill, subtle */}
@@ -1218,7 +1205,7 @@ function DeliverableProgressBox({
     if (!phaseForm.startDate || !phaseForm.endDate) { toast.error('Dates required'); return; }
     if (phaseForm.startDate >= phaseForm.endDate) { toast.error('Start must be before end'); return; }
     try {
-      await api.post(`/projects/${projectId}/phases`, phaseForm);
+      await api.post(`/projects/${projectId}/phases`, { ...phaseForm, deliverableId: deliverable.id });
       toast.success('Phase added');
       setAddPhaseOpen(false);
       setPhaseForm({ name: '', startDate: '', endDate: '' });
@@ -1415,6 +1402,8 @@ function DeliverablesTabContent({ projectId }: { projectId?: number }) {
 
   const submit = async (deliv: any) => {
     if (!driveLink.trim()) { toast.error('Please enter a Google Drive link'); return; }
+    const isDriveLink = driveLink.trim().match(/^https:\/\/(drive|docs)\.google\.com\/.+/);
+    if (!isDriveLink) { toast.error('Please enter a valid Google Drive link (must start with https://drive.google.com or https://docs.google.com)'); return; }
     try {
       const payload: any = { googleDriveLink: driveLink };
       if (deliv.status === 'CHANGES_REQUESTED' && resubmitComment.trim()) {
@@ -1620,7 +1609,7 @@ function DisputesTabContent({ teamId, isLeader }: { teamId: number; isLeader: bo
       const list = Array.isArray(data) ? data : data?.data ?? [];
       const withPolls = await Promise.all(
           list.map(async (d: any) => {
-            if (d.status === 'OPEN') {
+            if (d.status === 'OPEN' || d.status === 'RESOLVED') {
               try {
                 const poll = await api.get(`/disputes/${d.id}/poll`) as any;
                 const p = poll?.data ?? poll;
@@ -1735,6 +1724,14 @@ function DisputesTabContent({ teamId, isLeader }: { teamId: number; isLeader: bo
 
                 {d.status === 'REJECTED' && d.rejectionReason && (
                     <p className="text-xs text-muted-foreground border-t pt-2">❌ Rejected: {d.rejectionReason}</p>
+                )}
+                {d.status === 'RESOLVED' && (
+                    <div className="p-3 rounded-md bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 text-sm mt-2">
+                      <p className="text-xs font-medium text-green-700 dark:text-green-400 mb-1">✅ Resolution</p>
+                      <p className="text-green-900 dark:text-green-200">
+                        {d.winningOption ?? 'Dispute resolved'}
+                      </p>
+                    </div>
                 )}
 
                 {isLeader && d.status === 'PENDING' && (

@@ -8,4 +8,5 @@ import java.util.List;
 @Repository
 public interface CheckpointRepository extends JpaRepository<Checkpoint, Long> {
     List<Checkpoint> findByPhaseId(Long phaseId);
+    List<Checkpoint> findByAssignedToId(Long userId);
 }

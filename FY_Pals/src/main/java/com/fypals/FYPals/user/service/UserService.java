@@ -62,17 +62,30 @@ public class UserService {
         user.setName(request.getName());
         user.setBio(request.getBio());
         user.setSkills(request.getSkills());
-        user.setProfileComplete(true);
 
         if (user instanceof Student student) {
             student.setGpa(request.getGpa());
             student.setInterests(request.getInterests());
             student.setPastProjects(request.getPastProjects());
+            // Student profile is complete when name, skills and interests are filled
+            boolean complete = request.getName() != null && !request.getName().trim().isEmpty()
+                    && request.getSkills() != null && !request.getSkills().trim().isEmpty()
+                    && request.getInterests() != null && !request.getInterests().trim().isEmpty();
+            user.setProfileComplete(complete);
         } else if (user instanceof Advisor advisor) {
             advisor.setDepartment(request.getDepartment());
             advisor.setResearchAreas(request.getResearchAreas());
+            // Advisor profile is complete when name, skills, department and research areas are filled
+            boolean complete = request.getName() != null && !request.getName().trim().isEmpty()
+                    && request.getSkills() != null && !request.getSkills().trim().isEmpty()
+                    && request.getDepartment() != null && !request.getDepartment().trim().isEmpty()
+                    && request.getResearchAreas() != null && !request.getResearchAreas().trim().isEmpty();
+            user.setProfileComplete(complete);
         } else if (user instanceof FYPStaff staff) {
             staff.setDesignation(request.getDesignation());
+            // FYP Staff profile is complete when name is filled
+            boolean complete = request.getName() != null && !request.getName().trim().isEmpty();
+            user.setProfileComplete(complete);
         }
 
         userRepository.save(user);

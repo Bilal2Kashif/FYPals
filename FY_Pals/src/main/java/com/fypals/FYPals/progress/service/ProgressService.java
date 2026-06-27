@@ -43,7 +43,7 @@ public class ProgressService {
     }
 
     @Transactional
-    public Checkpoint updateCheckpointStatus(Long checkpointId, String newStatus, String callerRole) {
+    public Checkpoint updateCheckpointStatus(Long checkpointId, String newStatus, String callerRole, Long callerId) {
         Checkpoint cp = checkpointRepository.findById(checkpointId)
                 .orElseThrow(() -> new RuntimeException("Checkpoint not found"));
 
@@ -61,6 +61,13 @@ public class ProgressService {
         if ("MEMBER".equals(callerRole)) {
             if (!"IN_PROGRESS".equals(newStatus) && !"IN_REVIEW".equals(newStatus)) {
                 throw new RuntimeException("Team members can only set status to IN_PROGRESS or IN_REVIEW");
+            }
+        }
+        // Students can only update checkpoints assigned to them or unassigned
+        if ("MEMBER".equals(callerRole)) {
+            Long assignedToId = cp.getAssignedTo() != null ? cp.getAssignedTo().getId() : null;
+            if (assignedToId != null && !assignedToId.equals(callerId)) {
+                throw new RuntimeException("You can only update checkpoints assigned to you or unassigned ones");
             }
         }
 

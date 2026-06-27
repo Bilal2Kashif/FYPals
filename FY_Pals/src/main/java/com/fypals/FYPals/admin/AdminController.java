@@ -141,4 +141,10 @@ public class AdminController {
         Pageable pageable = PageRequest.of(page, size);
         return ResponseEntity.ok(adminService.getAllPosts(pageable));
     }
+
+    @DeleteMapping("/posts/{id}")
+    public ResponseEntity<?> deletePost(@PathVariable Long id) {
+        adminService.deletePost(id);
+        return ResponseEntity.ok(Map.of("message", "Post deleted successfully"));
+    }
 }

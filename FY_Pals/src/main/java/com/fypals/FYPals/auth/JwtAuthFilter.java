@@ -1,5 +1,6 @@
 package com.fypals.FYPals.auth;
 
+import com.fypals.FYPals.user.repository.UserRepository;
 import com.fypals.FYPals.user.service.UserDetailsServiceImpl;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -19,8 +20,9 @@ import java.io.IOException;
 @RequiredArgsConstructor
 public class JwtAuthFilter extends OncePerRequestFilter {
 
-    private final JwtUtil jwtUtil;
+    private final JwtUtil              jwtUtil;
     private final UserDetailsServiceImpl userDetailsService;
+    private final UserRepository         userRepository;
 
     @Override
     protected void doFilterInternal(HttpServletRequest request,
@@ -39,8 +41,22 @@ public class JwtAuthFilter extends OncePerRequestFilter {
 
         if (jwtUtil.isTokenValid(token)) {
             String email = jwtUtil.extractEmail(token);
-            UserDetails userDetails = userDetailsService.loadUserByUsername(email);
 
+            // Reject token if it was issued before the user's role was last changed
+            java.util.Date issuedAt = jwtUtil.extractIssuedAt(token);
+            boolean tokenStale = userRepository.findByEmail(email)
+                    .map(u -> u.getRoleChangedAt())
+                    .filter(changed -> issuedAt != null &&
+                            issuedAt.toInstant().isBefore(changed.atZone(java.time.ZoneId.systemDefault()).toInstant()))
+                    .isPresent();
+
+            if (tokenStale) {
+                // Token predates a role change — force re-login
+                response.setStatus(401);
+                return;
+            }
+
+            UserDetails userDetails = userDetailsService.loadUserByUsername(email);
             UsernamePasswordAuthenticationToken authToken =
                     new UsernamePasswordAuthenticationToken(
                             userDetails, null, userDetails.getAuthorities());

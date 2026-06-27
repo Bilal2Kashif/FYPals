@@ -26,6 +26,7 @@ public class DisputeService {
     @Autowired private PollVoteRepository pollVoteRepository;
     @Autowired private NotificationService notificationService;
     @Autowired private UserRepository     userRepository;
+    @Autowired private com.fypals.FYPals.team.repository.TeamRepository teamRepository;
 
     private Dispute enrich(Dispute d) {
         userRepository.findById(d.getRaisedBy())
@@ -69,7 +70,21 @@ public class DisputeService {
         if (targetItem == null || targetItem.trim().isEmpty()) {
             throw new RuntimeException("Target item cannot be empty");
         }
-        return enrich(disputeRepository.save(new Dispute(teamId, raisedBy, targetItem, reason)));
+        Dispute saved = disputeRepository.save(new Dispute(teamId, raisedBy, targetItem, reason));
+
+        // Notify team leader about the raised dispute
+        teamRepository.findById(teamId).ifPresent(team -> {
+            if (team.getLeader() != null && !team.getLeader().getId().equals(raisedBy)) {
+                notificationService.sendNotification(
+                        team.getLeader().getId(),
+                        "A dispute has been raised about '" + targetItem + "'",
+                        "DISPUTE_RAISED",
+                        saved.getId()
+                );
+            }
+        });
+
+        return enrich(saved);
     }
 
     public List<Dispute> getPendingDisputes(Long teamId) {

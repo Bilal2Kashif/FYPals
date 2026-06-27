@@ -3,3 +3,5 @@ frontend/.next/
 frontend/.env.local
 target/
 *.class
+.idea/
+*.iml

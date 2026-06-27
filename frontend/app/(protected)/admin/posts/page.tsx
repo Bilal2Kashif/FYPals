@@ -56,11 +56,10 @@ export default function AdminPostsPage() {
   // Search (client-side on fetched page)
   const [search, setSearch] = useState('');
 
-  const load = async (p = page) => {
+  const load = async (p = page, cat = category) => {
     setLoading(true);
     try {
-      const params: any = { page: p, size: 15 };
-      if (category !== 'ALL') params.category = category;
+      const params: any = { page: p, size: 100 };
       const res = await api.get('/admin/posts', { params }) as unknown as Page<Post>;
       setData(res);
     } catch (err: any) {
@@ -71,8 +70,8 @@ export default function AdminPostsPage() {
   };
 
   // Category change resets to page 0 — same as original
-  useEffect(() => { setPage(0); load(0); }, [category]);
-  useEffect(() => { load(page); }, [page]);
+  useEffect(() => { setPage(0); load(0, category); }, [category]);
+  useEffect(() => { if (page !== 0) load(page); }, [page]);
 
   const deletePost = async (id: number) => {
     if (!confirm('Delete this post? This cannot be undone.')) return;
@@ -85,16 +84,16 @@ export default function AdminPostsPage() {
     }
   };
 
-  // Client-side search filter on fetched page
+// Client-side search + category filter
   const allPosts = data?.content ?? [];
   const posts = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return allPosts;
-    return allPosts.filter((p) =>
-        p.title?.toLowerCase().includes(q) ||
-        p.authorName?.toLowerCase().includes(q)
-    );
-  }, [allPosts, search]);
+    return allPosts.filter((p) => {
+      const matchSearch = !q || p.title?.toLowerCase().includes(q) || p.authorName?.toLowerCase().includes(q);
+      const matchCategory = category === 'ALL' || p.category === category;
+      return matchSearch && matchCategory;
+    });
+  }, [allPosts, search, category]);
 
   const totalPages = data?.totalPages ?? 1;
 

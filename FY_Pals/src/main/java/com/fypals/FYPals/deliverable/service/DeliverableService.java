@@ -49,6 +49,18 @@ public class DeliverableService {
             throw new IllegalArgumentException("Deadline cannot be in the past");
         }
 
+        // New deadline must be after all existing deliverables' deadlines
+        deliverableRepository.findByProjectId(projectId).stream()
+                .map(Deliverable::getDeadline)
+                .filter(d -> d != null)
+                .max(java.util.Comparator.naturalOrder())
+                .ifPresent(latestDeadline -> {
+                    if (!deadlineDate.isAfter(latestDeadline)) {
+                        throw new IllegalArgumentException(
+                                "New deliverable deadline must be after the latest existing deadline (" + latestDeadline + ")");
+                    }
+                });
+
         Deliverable d = new Deliverable();
         d.setProject(project);
         d.setTitle(title.trim());
@@ -103,7 +115,7 @@ public class DeliverableService {
      * ADVISOR: must provide a decision (APPROVED or CHANGES_REQUESTED).
      *   When APPROVED: automatically marks all checkpoints belonging to this
      *   deliverable's phases as COMPLETE and recalculates project completion.
-     * FYP_STAFF: leaves a comment only — no decision, no status change.
+     * FYP_STAFF: leaves a comment only - no decision, no status change.
      */
     public Feedback giveFeedback(Long deliverableId, String comment,
                                  String decision, String callerRole) {
@@ -129,15 +141,9 @@ public class DeliverableService {
             d.setStatus(decision);
             deliverableRepository.save(d);
 
-            // ── Auto-complete all checkpoints when deliverable is APPROVED ──────────
-            // Phases belong to a deliverable by date range:
-            // a phase belongs to this deliverable if its endDate <= this deliverable's
-            // deadline AND endDate > the previous deliverable's deadline (or no previous).
-            // Deliverables are sorted by deadline ascending to find the boundary.
             if ("APPROVED".equals(decision) && d.getProject() != null) {
                 Long projectId = d.getProject().getId();
 
-                // All deliverables for this project sorted by deadline ascending
                 List<Deliverable> allDeliverables = deliverableRepository
                         .findByProjectId(projectId)
                         .stream()
@@ -145,7 +151,6 @@ public class DeliverableService {
                         .sorted(java.util.Comparator.comparing(Deliverable::getDeadline))
                         .collect(Collectors.toList());
 
-                // Lower bound: the deadline of the deliverable immediately before this one
                 LocalDate lowerBound = null;
                 for (Deliverable del : allDeliverables) {
                     if (del.getId().equals(d.getId())) break;
@@ -153,7 +158,6 @@ public class DeliverableService {
                 }
                 final LocalDate startBound = lowerBound;
 
-                // Mark every checkpoint of matching phases COMPLETE
                 List<Phase> phases = phaseRepository.findByProjectId(projectId);
                 for (Phase phase : phases) {
                     boolean belongs =
@@ -170,15 +174,12 @@ public class DeliverableService {
                     }
                 }
 
-                // Recalculate overall project completion percentage
                 progressService.recalculateProjectCompletion(projectId);
             }
         }
-        // FYP_STAFF: no decision, no status change
 
         Feedback saved = feedbackRepository.save(fb);
 
-        // Notify all team members about feedback
         if (d.getProject() != null && d.getProject().getTeam() != null) {
             Long teamId = d.getProject().getTeam().getId();
             String msg = "ADVISOR".equals(callerRole)
